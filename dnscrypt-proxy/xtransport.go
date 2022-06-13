@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha512"
@@ -9,12 +10,14 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -70,9 +73,11 @@ type XTransport struct {
 	proxyDialer              *netproxy.Dialer
 	httpProxyFunction        func(*http.Request) (*url.URL, error)
 	tlsClientCreds           DOHClientCreds
+	listenAddresses          []string
+	ipsCacheFilePath         string
 }
 
-func NewXTransport() *XTransport {
+func NewXTransport(listenAddresses []string, ipsCacheFilePath string) *XTransport {
 	if err := isIPAndPort(DefaultBootstrapResolver); err != nil {
 		panic("DefaultBootstrapResolver does not parse")
 	}
@@ -88,6 +93,8 @@ func NewXTransport() *XTransport {
 		useIPv6:                  false,
 		tlsDisableSessionTickets: false,
 		tlsCipherSuite:           nil,
+		listenAddresses:          listenAddresses,
+		ipsCacheFilePath:         ipsCacheFilePath,
 	}
 	return &xTransport
 }
@@ -109,7 +116,68 @@ func (xTransport *XTransport) saveCachedIP(host string, ip net.IP, ttl time.Dura
 	}
 	xTransport.cachedIPs.Lock()
 	xTransport.cachedIPs.cache[host] = item
+	xTransport.saveCachedIpsToFile()
 	xTransport.cachedIPs.Unlock()
+}
+
+// Save cached IPs to a file for storing data after the application is stopped
+func (xTransport *XTransport) saveCachedIpsToFile() {
+	file, err := os.OpenFile(xTransport.ipsCacheFilePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		dlog.Infof("Unable to access [%v]: [%v]", xTransport.ipsCacheFilePath, err)
+		return
+	}
+	defer file.Close()
+
+	writer := bufio.NewWriter(file)
+
+	for host, cachedIp := range xTransport.cachedIPs.cache {
+		if cachedIp != nil && cachedIp.ip != nil && cachedIp.expiration != nil {
+			line := fmt.Sprintf("%s %s %d\n", host, cachedIp.ip, (*cachedIp.expiration).Unix())
+			_, err := writer.WriteString(line)
+			if err != nil {
+				return
+			}
+		}
+	}
+	_ = writer.Flush()
+}
+
+// ReadCachedIpsFromFile Read cached IPs from a file to minimize plaintext DNS queries
+func (xTransport *XTransport) ReadCachedIpsFromFile() {
+	file, err := os.Open(xTransport.ipsCacheFilePath)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			} else {
+				return
+			}
+		}
+
+		var host string
+		var ip string
+		var unixTime int64
+
+		_, err = fmt.Sscanf(line, "%s %s %d", &host, &ip, &unixTime)
+		if err != nil {
+			continue
+		}
+		expiration := time.Unix(unixTime, 0)
+		item := &CachedIPItem{ip: net.ParseIP(ip), expiration: &expiration}
+
+		xTransport.cachedIPs.Lock()
+		xTransport.cachedIPs.cache[host] = item
+		xTransport.cachedIPs.Unlock()
+	}
 }
 
 func (xTransport *XTransport) loadCachedIP(host string) (ip net.IP, expired bool) {
@@ -322,6 +390,24 @@ func (xTransport *XTransport) resolveUsingResolvers(
 	return
 }
 
+//Resolve the host using its own encrypted connection if available
+func (xTransport *XTransport) resolveUsingItself(
+	host string,
+) (ip net.IP, ttl time.Duration, err error) {
+
+	if len(xTransport.listenAddresses) == 0 {
+		return nil, 0, errors.New("at least one listening IP address must be configured")
+	}
+
+	ip, ttl, err = xTransport.resolveUsingResolver("tcp", host, xTransport.listenAddresses[0])
+	if err == nil {
+		dlog.Info("Resolution succeeded with encrypted query")
+	} else {
+		dlog.Infof("Unable to resolve [%s] using encrypted query %v", host, err)
+	}
+	return
+}
+
 // If a name is not present in the cache, resolve the name and update the cache
 func (xTransport *XTransport) resolveAndUpdateCache(host string) error {
 	if xTransport.proxyDialer != nil || xTransport.httpProxyFunction != nil {
@@ -337,7 +423,10 @@ func (xTransport *XTransport) resolveAndUpdateCache(host string) error {
 	var foundIP net.IP
 	var ttl time.Duration
 	var err error
-	if !xTransport.ignoreSystemDNS {
+
+	foundIP, ttl, err = xTransport.resolveUsingItself(host)
+
+	if err != nil && !xTransport.ignoreSystemDNS {
 		foundIP, ttl, err = xTransport.resolveUsingSystem(host)
 	}
 	if xTransport.ignoreSystemDNS || err != nil {

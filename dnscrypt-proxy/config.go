@@ -375,7 +375,13 @@ func ConfigLoad(proxy *Proxy, flags *ConfigFlags) error {
 	proxy.userName = config.UserName
 
 	proxy.child = *flags.Child
-	proxy.xTransport = NewXTransport()
+	configFilePath := *flags.ConfigFile
+	ipsCacheFilePath := "ips-cache.tmp"
+	if parentDirSymbolIndex := strings.LastIndex(configFilePath, "/"); parentDirSymbolIndex >= 0 {
+		ipsCacheFilePath = configFilePath[:parentDirSymbolIndex+1] + ipsCacheFilePath
+	}
+	proxy.xTransport = NewXTransport(config.ListenAddresses, ipsCacheFilePath)
+	proxy.xTransport.ReadCachedIpsFromFile()
 	proxy.xTransport.tlsDisableSessionTickets = config.TLSDisableSessionTickets
 	proxy.xTransport.tlsCipherSuite = config.TLSCipherSuite
 	proxy.xTransport.mainProto = proxy.mainProto
