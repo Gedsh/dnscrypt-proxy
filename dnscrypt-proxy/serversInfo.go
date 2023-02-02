@@ -260,7 +260,7 @@ func (serversInfo *ServersInfo) estimatorUpdate(currentActive int) {
 	if activeCount == serversCount {
 		return
 	}
-	candidate := rand.Intn(serversCount-activeCount)+activeCount
+	candidate := rand.Intn(serversCount-activeCount) + activeCount
 	candidateRtt, currentActiveRtt := serversInfo.inner[candidate].rtt.Value(), serversInfo.inner[currentActive].rtt.Value()
 	if currentActiveRtt < 0 {
 		currentActiveRtt = candidateRtt
@@ -434,16 +434,19 @@ func route(proxy *Proxy, name string, serverProto stamps.StampProtoType) (*Relay
 		return nil, nil
 	}
 	relayStamps := make([]stamps.ServerStamp, 0)
+	relayStampToName := make(map[string]string)
 	for _, relayName := range relayNames {
 		if relayStamp, err := stamps.NewServerStampFromString(relayName); err == nil {
 			if relayStamp.Proto == relayProto {
 				relayStamps = append(relayStamps, relayStamp)
+				relayStampToName[relayStamp.String()] = relayName
 			}
 		} else if relayName == "*" {
 			proxy.serversInfo.RLock()
 			for _, registeredServer := range proxy.serversInfo.registeredRelays {
 				if registeredServer.stamp.Proto == relayProto {
 					relayStamps = append(relayStamps, registeredServer.stamp)
+					relayStampToName[registeredServer.stamp.String()] = registeredServer.name
 				}
 			}
 			proxy.serversInfo.RUnlock()
@@ -454,12 +457,7 @@ func route(proxy *Proxy, name string, serverProto stamps.StampProtoType) (*Relay
 			for _, registeredServer := range proxy.serversInfo.registeredRelays {
 				if registeredServer.name == relayName && registeredServer.stamp.Proto == relayProto {
 					relayStamps = append(relayStamps, registeredServer.stamp)
-					break
-				}
-			}
-			for _, registeredServer := range proxy.serversInfo.registeredServers {
-				if registeredServer.name == relayName && registeredServer.stamp.Proto == relayProto {
-					relayStamps = append(relayStamps, registeredServer.stamp)
+					relayStampToName[registeredServer.stamp.String()] = relayName
 					break
 				}
 			}
@@ -479,16 +477,7 @@ func route(proxy *Proxy, name string, serverProto stamps.StampProtoType) (*Relay
 	if relayCandidateStamp == nil {
 		return nil, fmt.Errorf("No valid relay for server [%v]", name)
 	}
-	relayName := relayCandidateStamp.ServerAddrStr
-	proxy.serversInfo.RLock()
-	for _, registeredServer := range proxy.serversInfo.registeredRelays {
-		if registeredServer.stamp.Proto == relayProto &&
-			registeredServer.stamp.ServerAddrStr == relayCandidateStamp.ServerAddrStr {
-			relayName = registeredServer.name
-			break
-		}
-	}
-	proxy.serversInfo.RUnlock()
+	relayName := relayStampToName[relayCandidateStamp.String()]
 	switch relayCandidateStamp.Proto {
 	case stamps.StampProtoTypeDNSCrypt, stamps.StampProtoTypeDNSCryptRelay:
 		relayUDPAddr, err := net.ResolveUDPAddr("udp", relayCandidateStamp.ServerAddrStr)
@@ -706,7 +695,7 @@ func fetchDoHServerInfo(proxy *Proxy, name string, stamp stamps.ServerStamp, isN
 		protocol = "http/1.x"
 	}
 	if strings.HasPrefix(protocol, "http/1.") {
-		dlog.Warnf("[%s] does not support HTTP/2", name)
+		dlog.Warnf("[%s] does not support HTTP/2 nor HTTP/3", name)
 	}
 	dlog.Infof("[%s] TLS version: %x - Protocol: %v - Cipher suite: %v", name, tls.Version, protocol, tls.CipherSuite)
 	showCerts := proxy.showCerts
