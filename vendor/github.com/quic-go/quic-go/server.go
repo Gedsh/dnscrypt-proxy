@@ -157,11 +157,10 @@ func listenAddr(addr string, tlsConf *tls.Config, config *Config, acceptEarly bo
 // and WriteMsgUDP will be used instead of ReadFrom and WriteTo to read/write
 // packets. A single net.PacketConn only be used for a single call to Listen.
 // The PacketConn can be used for simultaneous calls to Dial. QUIC connection
-// IDs are used for demultiplexing the different connections. The tls.Config
-// must not be nil and must contain a certificate configuration. The
-// tls.Config.CipherSuites allows setting of TLS 1.3 cipher suites. Furthermore,
-// it must define an application control (using NextProtos). The quic.Config may
-// be nil, in that case the default values will be used.
+// IDs are used for demultiplexing the different connections.
+// The tls.Config must not be nil and must contain a certificate configuration.
+// Furthermore, it must define an application control (using NextProtos).
+// The quic.Config may be nil, in that case the default values will be used.
 func Listen(conn net.PacketConn, tlsConf *tls.Config, config *Config) (Listener, error) {
 	return listen(conn, tlsConf, config, false)
 }
@@ -341,7 +340,7 @@ func (s *baseServer) handlePacketImpl(p *receivedPacket) bool /* is the buffer s
 			return false
 		}
 		if !s.config.DisableVersionNegotiationPackets {
-			go s.sendVersionNegotiationPacket(p.remoteAddr, src, dest, p.info.OOB())
+			go s.sendVersionNegotiationPacket(p.remoteAddr, src, dest, p.info.OOB(), v)
 		}
 		return false
 	}
@@ -536,7 +535,7 @@ func (s *baseServer) handleNewConn(conn quicConn) {
 	} else {
 		// wait until the handshake is complete (or fails)
 		select {
-		case <-conn.HandshakeComplete().Done():
+		case <-conn.HandshakeComplete():
 		case <-connCtx.Done():
 			return
 		}
@@ -669,8 +668,8 @@ func (s *baseServer) sendError(remoteAddr net.Addr, hdr *wire.Header, sealer han
 	return err
 }
 
-func (s *baseServer) sendVersionNegotiationPacket(remote net.Addr, src, dest protocol.ArbitraryLenConnectionID, oob []byte) {
-	s.logger.Debugf("Client offered version %s, sending Version Negotiation")
+func (s *baseServer) sendVersionNegotiationPacket(remote net.Addr, src, dest protocol.ArbitraryLenConnectionID, oob []byte, v protocol.VersionNumber) {
+	s.logger.Debugf("Client offered version %s, sending Version Negotiation", v)
 
 	data := wire.ComposeVersionNegotiation(dest, src, s.config.Versions)
 	if s.config.Tracer != nil {

@@ -380,7 +380,7 @@ func ConfigLoad(proxy *Proxy, flags *ConfigFlags) error {
 	if parentDirSymbolIndex := strings.LastIndex(configFilePath, "/"); parentDirSymbolIndex >= 0 {
 		ipsCacheFilePath = configFilePath[:parentDirSymbolIndex+1] + ipsCacheFilePath
 	}
-	proxy.xTransport = NewXTransport(config.ListenAddresses, ipsCacheFilePath)
+	proxy.xTransport = NewXTransport(ipsCacheFilePath)
 	proxy.xTransport.ReadCachedIpsFromFile()
 	proxy.xTransport.tlsDisableSessionTickets = config.TLSDisableSessionTickets
 	proxy.xTransport.tlsCipherSuite = config.TLSCipherSuite
@@ -900,7 +900,7 @@ func (config *Config) loadSource(proxy *Proxy, cfgSourceName string, cfgSource *
 		cfgSource.Prefix,
 	)
 	if err != nil {
-		if len(source.in) <= 0 {
+		if len(source.bin) <= 0 {
 			dlog.Criticalf("Unable to retrieve source [%s]: [%s]", cfgSourceName, err)
 			return err
 		}

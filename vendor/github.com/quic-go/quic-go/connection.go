@@ -696,8 +696,8 @@ func (s *connection) earlyConnReady() <-chan struct{} {
 	return s.earlyConnReadyChan
 }
 
-func (s *connection) HandshakeComplete() context.Context {
-	return s.handshakeCtx
+func (s *connection) HandshakeComplete() <-chan struct{} {
+	return s.handshakeCtx.Done()
 }
 
 func (s *connection) Context() context.Context {
@@ -1659,6 +1659,7 @@ func (s *connection) handleTransportParameters(params *wire.TransportParameters)
 			ErrorCode:    qerr.TransportParameterError,
 			ErrorMessage: err.Error(),
 		})
+		return
 	}
 	s.peerParams = params
 	// On the client side we have to wait for handshake completion.
@@ -2026,6 +2027,21 @@ func (s *connection) logShortHeaderPacket(
 
 func (s *connection) logCoalescedPacket(packet *coalescedPacket) {
 	if s.logger.Debug() {
+		// There's a short period between dropping both Initial and Handshake keys and completion of the handshake,
+		// during which we might call PackCoalescedPacket but just pack a short header packet.
+		if len(packet.longHdrPackets) == 0 && packet.shortHdrPacket != nil {
+			s.logShortHeaderPacket(
+				packet.shortHdrPacket.DestConnID,
+				packet.shortHdrPacket.Ack,
+				packet.shortHdrPacket.Frames,
+				packet.shortHdrPacket.PacketNumber,
+				packet.shortHdrPacket.PacketNumberLen,
+				packet.shortHdrPacket.KeyPhase,
+				packet.shortHdrPacket.Length,
+				false,
+			)
+			return
+		}
 		if len(packet.longHdrPackets) > 1 {
 			s.logger.Debugf("-> Sending coalesced packet (%d parts, %d bytes) for connection %s", len(packet.longHdrPackets), packet.buffer.Len(), s.logID)
 		} else {
@@ -2179,7 +2195,7 @@ func (s *connection) GetVersion() protocol.VersionNumber {
 }
 
 func (s *connection) NextConnection() Connection {
-	<-s.HandshakeComplete().Done()
+	<-s.HandshakeComplete()
 	s.streamsMap.UseResetMaps()
 	return s
 }
