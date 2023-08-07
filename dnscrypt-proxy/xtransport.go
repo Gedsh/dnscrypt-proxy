@@ -58,7 +58,6 @@ type AltSupport struct {
 type XTransport struct {
 	transport                *http.Transport
 	h3Transport              *http3.RoundTripper
-	h3UDPConn                *net.UDPConn
 	keepAlive                time.Duration
 	timeout                  time.Duration
 	cachedIPs                CachedIPs
@@ -76,6 +75,7 @@ type XTransport struct {
 	proxyDialer              *netproxy.Dialer
 	httpProxyFunction        func(*http.Request) (*url.URL, error)
 	tlsClientCreds           DOHClientCreds
+	keyLogWriter             io.Writer
 	ipsCacheFilePath         string
 }
 
@@ -95,6 +95,7 @@ func NewXTransport(ipsCacheFilePath string) *XTransport {
 		useIPv6:                  false,
 		tlsDisableSessionTickets: false,
 		tlsCipherSuite:           nil,
+		keyLogWriter:             nil,
 		ipsCacheFilePath:         ipsCacheFilePath,
 	}
 	return &xTransport
@@ -200,15 +201,7 @@ func (xTransport *XTransport) loadCachedIP(host string) (ip net.IP, expired bool
 func (xTransport *XTransport) rebuildTransport() {
 	dlog.Debug("Rebuilding transport")
 	if xTransport.transport != nil {
-		if xTransport.h3Transport != nil {
-			xTransport.h3Transport.Close()
-			if xTransport.h3UDPConn != nil {
-				xTransport.h3UDPConn.Close()
-				xTransport.h3UDPConn = nil
-			}
-		} else {
-			xTransport.transport.CloseIdleConnections()
-		}
+		xTransport.transport.CloseIdleConnections()
 	}
 	timeout := xTransport.timeout
 	transport := &http.Transport{
@@ -250,6 +243,10 @@ func (xTransport *XTransport) rebuildTransport() {
 
 	tlsClientConfig := tls.Config{}
 	certPool, certPoolErr := x509.SystemCertPool()
+
+	if xTransport.keyLogWriter != nil {
+		tlsClientConfig.KeyLogWriter = xTransport.keyLogWriter
+	}
 
 	if clientCreds.rootCA != "" {
 		if certPool == nil {
@@ -325,33 +322,42 @@ func (xTransport *XTransport) rebuildTransport() {
 	}
 	xTransport.transport = transport
 	if xTransport.http3 {
-		h3Transport := &http3.RoundTripper{DisableCompression: true, TLSClientConfig: &tlsClientConfig, Dial: func(ctx context.Context, addrStr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
+		dial := func(ctx context.Context, addrStr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
 			dlog.Debugf("Dialing for H3: [%v]", addrStr)
 			host, port := ExtractHostAndPort(addrStr, stamps.DefaultPort)
 			ipOnly := host
 			cachedIP, _ := xTransport.loadCachedIP(host)
+			network := "udp4"
 			if cachedIP != nil {
 				if ipv4 := cachedIP.To4(); ipv4 != nil {
 					ipOnly = ipv4.String()
 				} else {
 					ipOnly = "[" + cachedIP.String() + "]"
+					network = "udp6"
 				}
 			} else {
-				dlog.Debugf("[%s] IP address was not cached in H3 DialContext", host)
+				dlog.Debugf("[%s] IP address was not cached in H3 context", host)
+				if xTransport.useIPv6 {
+					if xTransport.useIPv4 {
+						network = "udp"
+					} else {
+						network = "udp6"
+					}
+				}
 			}
 			addrStr = ipOnly + ":" + strconv.Itoa(port)
-			udpAddr, err := net.ResolveUDPAddr("udp", addrStr)
+			udpAddr, err := net.ResolveUDPAddr(network, addrStr)
 			if err != nil {
 				return nil, err
 			}
-			if xTransport.h3UDPConn == nil {
-				xTransport.h3UDPConn, err = net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
-				if err != nil {
-					return nil, err
-				}
+			udpConn, err := net.ListenUDP(network, nil)
+			if err != nil {
+				return nil, err
 			}
-			return quic.DialEarlyContext(ctx, xTransport.h3UDPConn, udpAddr, host, tlsCfg, cfg)
-		}}
+			tlsCfg.ServerName = host
+			return quic.DialEarly(ctx, udpConn, udpAddr, tlsCfg, cfg)
+		}
+		h3Transport := &http3.RoundTripper{DisableCompression: true, TLSClientConfig: &tlsClientConfig, Dial: dial}
 		xTransport.h3Transport = h3Transport
 	}
 }
@@ -605,13 +611,8 @@ func (xTransport *XTransport) Fetch(
 			err = errors.New(resp.Status)
 		}
 	} else {
-		if hasAltSupport {
-			dlog.Debugf("HTTP client error: [%v] - closing H3 connections", err)
-			xTransport.h3Transport.Close()
-		} else {
-			dlog.Debugf("HTTP client error: [%v] - closing idle connections", err)
-			xTransport.transport.CloseIdleConnections()
-		}
+		dlog.Debugf("HTTP client error: [%v] - closing idle connections", err)
+		xTransport.transport.CloseIdleConnections()
 	}
 	statusCode := 503
 	if resp != nil {

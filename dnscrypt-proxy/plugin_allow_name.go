@@ -29,13 +29,13 @@ func (plugin *PluginAllowName) Description() string {
 
 func (plugin *PluginAllowName) Init(proxy *Proxy) error {
 	dlog.Noticef("Loading the set of allowed names from [%s]", proxy.allowNameFile)
-	bin, err := ReadTextFile(proxy.allowNameFile)
+	lines, err := ReadTextFile(proxy.allowNameFile)
 	if err != nil {
 		return err
 	}
 	plugin.allWeeklyRanges = proxy.allWeeklyRanges
 	plugin.patternMatcher = NewPatternMatcher()
-	for lineNo, line := range strings.Split(string(bin), "\n") {
+	for lineNo, line := range strings.Split(lines, "\n") {
 		line = TrimAndStripInlineComments(line)
 		if len(line) == 0 {
 			continue
@@ -96,10 +96,14 @@ func (plugin *PluginAllowName) Eval(pluginsState *PluginsState, msg *dns.Msg) er
 		pluginsState.sessionData["whitelisted"] = true
 		if plugin.logger != nil {
 			var clientIPStr string
-			if pluginsState.clientProto == "udp" {
+			switch pluginsState.clientProto {
+			case "udp":
 				clientIPStr = (*pluginsState.clientAddr).(*net.UDPAddr).IP.String()
-			} else {
+			case "tcp", "local_doh":
 				clientIPStr = (*pluginsState.clientAddr).(*net.TCPAddr).IP.String()
+			default:
+				// Ignore internal flow.
+				return nil
 			}
 			var line string
 			if plugin.format == "tsv" {

@@ -13,8 +13,6 @@ import (
 )
 
 // ParseConnectionID parses the destination connection ID of a packet.
-// It uses the data slice for the connection ID.
-// That means that the connection ID must not be used after the packet buffer is released.
 func ParseConnectionID(data []byte, shortHeaderConnIDLen int) (protocol.ConnectionID, error) {
 	if len(data) == 0 {
 		return protocol.ConnectionID{}, io.EOF
@@ -110,7 +108,7 @@ func Is0RTTPacket(b []byte) bool {
 	version := protocol.VersionNumber(binary.BigEndian.Uint32(b[1:5]))
 	//nolint:exhaustive // We only need to test QUIC versions that we support.
 	switch version {
-	case protocol.Version1, protocol.VersionDraft29:
+	case protocol.Version1:
 		return b[0]>>4&0b11 == 0b01
 	case protocol.Version2:
 		return b[0]>>4&0b11 == 0b10

@@ -30,13 +30,13 @@ func (plugin *PluginAllowedIP) Description() string {
 
 func (plugin *PluginAllowedIP) Init(proxy *Proxy) error {
 	dlog.Noticef("Loading the set of allowed IP rules from [%s]", proxy.allowedIPFile)
-	bin, err := ReadTextFile(proxy.allowedIPFile)
+	lines, err := ReadTextFile(proxy.allowedIPFile)
 	if err != nil {
 		return err
 	}
 	plugin.allowedPrefixes = iradix.New()
 	plugin.allowedIPs = make(map[string]interface{})
-	for lineNo, line := range strings.Split(string(bin), "\n") {
+	for lineNo, line := range strings.Split(lines, "\n") {
 		line = TrimAndStripInlineComments(line)
 		if len(line) == 0 {
 			continue
@@ -119,10 +119,14 @@ func (plugin *PluginAllowedIP) Eval(pluginsState *PluginsState, msg *dns.Msg) er
 		if plugin.logger != nil {
 			qName := pluginsState.qName
 			var clientIPStr string
-			if pluginsState.clientProto == "udp" {
+			switch pluginsState.clientProto {
+			case "udp":
 				clientIPStr = (*pluginsState.clientAddr).(*net.UDPAddr).IP.String()
-			} else {
+			case "tcp", "local_doh":
 				clientIPStr = (*pluginsState.clientAddr).(*net.TCPAddr).IP.String()
+			default:
+				// Ignore internal flow.
+				return nil
 			}
 			var line string
 			if plugin.format == "tsv" {

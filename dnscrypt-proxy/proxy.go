@@ -619,7 +619,7 @@ func (proxy *Proxy) processIncomingQuery(
 	start time.Time,
 	onlyCached bool,
 ) []byte {
-	var response []byte = nil
+	var response []byte
 	if len(query) < MinDNSPacketSize {
 		return response
 	}

@@ -27,13 +27,18 @@ type App struct {
 }
 
 func main() {
-	TimezoneSetup()
+	tzErr := TimezoneSetup()
 	dlog.Init("dnscrypt-proxy", dlog.SeverityNotice, "DAEMON")
+	if tzErr != nil {
+		dlog.Warnf("Timezone setup failed: [%v]", tzErr)
+	}
 	runtime.MemProfileRate = 0
 
 	seed := make([]byte, 8)
-	crypto_rand.Read(seed)
-	rand.Seed(int64(binary.LittleEndian.Uint64(seed[:])))
+	if _, err := crypto_rand.Read(seed); err != nil {
+		dlog.Fatal(err)
+	}
+	rand.Seed(int64(binary.LittleEndian.Uint64(seed)))
 
 	pwd, err := os.Getwd()
 	if err != nil {
@@ -124,7 +129,7 @@ func (app *App) AppMain() {
 		dlog.Fatal(err)
 	}
 	if err := PidFileCreate(); err != nil {
-		dlog.Criticalf("Unable to create the PID file: %v", err)
+		dlog.Errorf("Unable to create the PID file: [%v]", err)
 	}
 	if err := app.proxy.InitPluginsGlobals(); err != nil {
 		dlog.Fatal(err)
@@ -139,7 +144,9 @@ func (app *App) AppMain() {
 }
 
 func (app *App) Stop(service service.Service) error {
-	PidFileRemove()
+	if err := PidFileRemove(); err != nil {
+		dlog.Warnf("Failed to remove the PID file: [%v]", err)
+	}
 	dlog.Notice("Stopped.")
 	return nil
 }

@@ -30,13 +30,13 @@ func (plugin *PluginBlockIP) Description() string {
 
 func (plugin *PluginBlockIP) Init(proxy *Proxy) error {
 	dlog.Noticef("Loading the set of IP blocking rules from [%s]", proxy.blockIPFile)
-	bin, err := ReadTextFile(proxy.blockIPFile)
+	lines, err := ReadTextFile(proxy.blockIPFile)
 	if err != nil {
 		return err
 	}
 	plugin.blockedPrefixes = iradix.New()
 	plugin.blockedIPs = make(map[string]interface{})
-	for lineNo, line := range strings.Split(string(bin), "\n") {
+	for lineNo, line := range strings.Split(lines, "\n") {
 		line = TrimAndStripInlineComments(line)
 		if len(line) == 0 {
 			continue
@@ -123,10 +123,14 @@ func (plugin *PluginBlockIP) Eval(pluginsState *PluginsState, msg *dns.Msg) erro
 		if plugin.logger != nil {
 			qName := pluginsState.qName
 			var clientIPStr string
-			if pluginsState.clientProto == "udp" {
+			switch pluginsState.clientProto {
+			case "udp":
 				clientIPStr = (*pluginsState.clientAddr).(*net.UDPAddr).IP.String()
-			} else {
+			case "tcp", "local_doh":
 				clientIPStr = (*pluginsState.clientAddr).(*net.TCPAddr).IP.String()
+			default:
+				// Ignore internal flow.
+				return nil
 			}
 			var line string
 			if plugin.format == "tsv" {

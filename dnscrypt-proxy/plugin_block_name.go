@@ -44,10 +44,14 @@ func (blockedNames *BlockedNames) check(pluginsState *PluginsState, qName string
 	pluginsState.returnCode = PluginsReturnCodeReject
 	if blockedNames.logger != nil {
 		var clientIPStr string
-		if pluginsState.clientProto == "udp" {
+		switch pluginsState.clientProto {
+		case "udp":
 			clientIPStr = (*pluginsState.clientAddr).(*net.UDPAddr).IP.String()
-		} else {
+		case "tcp", "local_doh":
 			clientIPStr = (*pluginsState.clientAddr).(*net.TCPAddr).IP.String()
+		default:
+			// Ignore internal flow.
+			return false, nil
 		}
 		var line string
 		if blockedNames.format == "tsv" {
@@ -83,7 +87,7 @@ func (plugin *PluginBlockName) Description() string {
 
 func (plugin *PluginBlockName) Init(proxy *Proxy) error {
 	dlog.Noticef("Loading the set of blocking rules from [%s]", proxy.blockNameFile)
-	bin, err := ReadTextFile(proxy.blockNameFile)
+	lines, err := ReadTextFile(proxy.blockNameFile)
 	if err != nil {
 		return err
 	}
@@ -91,7 +95,7 @@ func (plugin *PluginBlockName) Init(proxy *Proxy) error {
 		allWeeklyRanges: proxy.allWeeklyRanges,
 		patternMatcher:  NewPatternMatcher(),
 	}
-	for lineNo, line := range strings.Split(string(bin), "\n") {
+	for lineNo, line := range strings.Split(lines, "\n") {
 		line = TrimAndStripInlineComments(line)
 		if len(line) == 0 {
 			continue
