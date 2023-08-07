@@ -559,7 +559,7 @@ func (xTransport *XTransport) Fetch(
 			}
 		}
 	}
-	header := map[string][]string{"User-Agent": {"dnscrypt-proxy"}}
+	header := map[string][]string{"User-Agent": {""}}
 	if len(accept) > 0 {
 		header["Accept"] = []string{accept}
 	}
