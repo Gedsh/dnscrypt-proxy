@@ -637,7 +637,7 @@ func ConfigLoad(proxy *Proxy, flags *ConfigFlags) error {
 	proxy.anonDirectCertFallback = config.AnonymizedDNS.DirectCertFallback
 
 	if len(config.TLSKeyLogFile) > 0 {
-		f, err := os.OpenFile(config.TLSKeyLogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+		f, err := os.OpenFile(config.TLSKeyLogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err != nil {
 			dlog.Fatalf("Unable to create key log file [%s]: [%s]", config.TLSKeyLogFile, err)
 		}
@@ -900,9 +900,8 @@ func (config *Config) loadSource(proxy *Proxy, cfgSourceName string, cfgSource *
 	}
 	if cfgSource.RefreshDelay <= 0 {
 		cfgSource.RefreshDelay = 72
-	} else if cfgSource.RefreshDelay > 168 {
-		cfgSource.RefreshDelay = 168
 	}
+	cfgSource.RefreshDelay = Min(168, Max(24, cfgSource.RefreshDelay))
 	source, err := NewSource(
 		cfgSourceName,
 		proxy.xTransport,
