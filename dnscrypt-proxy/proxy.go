@@ -71,6 +71,7 @@ type Proxy struct {
 	ServerNames                   []string
 	DisabledServerNames           []string
 	requiredProps                 stamps.ServerInformalProperties
+	certRefreshDelayStartFailure  time.Duration
 	certRefreshDelayAfterFailure  time.Duration
 	timeout                       time.Duration
 	certRefreshDelay              time.Duration
@@ -252,9 +253,12 @@ func (proxy *Proxy) StartProxy() {
 	if proxy.showCerts {
 		os.Exit(0)
 	}
+	startSuccesfull := false
 	if liveServers > 0 {
+		startSuccesfull = true
 		dlog.Noticef("dnscrypt-proxy is ready - live servers: %d", liveServers)
 	} else if err != nil {
+		startSuccesfull = false
 		dlog.Error(err)
 		dlog.Notice("dnscrypt-proxy is waiting for at least one server to be reachable")
 	}
@@ -269,12 +273,15 @@ func (proxy *Proxy) StartProxy() {
 		go func() {
 			for {
 				delay := proxy.certRefreshDelay
-				if liveServers == 0 {
+				if liveServers == 0 && startSuccesfull {
 					delay = proxy.certRefreshDelayAfterFailure
+				} else if liveServers == 0 {
+					delay = proxy.certRefreshDelayStartFailure
 				}
 				clocksmith.Sleep(delay)
 				liveServers, _ = proxy.serversInfo.refresh(proxy)
 				if liveServers > 0 {
+					startSuccesfull = true
 					proxy.certIgnoreTimestamp = false
 				}
 				runtime.GC()
