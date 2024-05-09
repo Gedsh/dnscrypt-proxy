@@ -66,6 +66,10 @@ func main() {
 		os.Exit(0)
 	}
 
+	if fullexecpath, err := os.Executable(); err == nil {
+		WarnIfMaybeWritableByOtherUsers(fullexecpath)
+	}
+
 	app := &App{
 		flags: &flags,
 	}
