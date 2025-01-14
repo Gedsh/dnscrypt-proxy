@@ -750,7 +750,7 @@ func ConfigLoad(proxy *Proxy, flags *ConfigFlags) error {
 			return err
 		}
 		if len(proxy.registeredServers) == 0 {
-			return errors.New("No servers configured")
+			return errors.New("None of the servers listed in the server_names list was found in the configured sources.")
 		}
 	}
 	if *flags.List || *flags.ListAll {
@@ -947,7 +947,7 @@ func (config *Config) loadSource(proxy *Proxy, cfgSourceName string, cfgSource *
 	if cfgSource.RefreshDelay <= 0 {
 		cfgSource.RefreshDelay = 72
 	}
-	cfgSource.RefreshDelay = Min(168, Max(24, cfgSource.RefreshDelay))
+	cfgSource.RefreshDelay = Min(169, Max(25, cfgSource.RefreshDelay))
 	source, err := NewSource(
 		cfgSourceName,
 		proxy.xTransport,

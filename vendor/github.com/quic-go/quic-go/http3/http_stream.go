@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 
 	"github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/internal/protocol"
@@ -49,34 +48,51 @@ type stream struct {
 	bytesRemainingInFrame uint64
 
 	datagrams *datagrammer
+
+	parseTrailer  func(io.Reader, uint64) error
+	parsedTrailer bool
 }
 
 var _ Stream = &stream{}
 
-func newStream(str quic.Stream, conn *connection, datagrams *datagrammer) *stream {
+func newStream(str quic.Stream, conn *connection, datagrams *datagrammer, parseTrailer func(io.Reader, uint64) error) *stream {
 	return &stream{
-		Stream:    str,
-		conn:      conn,
-		buf:       make([]byte, 16),
-		datagrams: datagrams,
+		Stream:       str,
+		conn:         conn,
+		buf:          make([]byte, 16),
+		datagrams:    datagrams,
+		parseTrailer: parseTrailer,
 	}
 }
 
 func (s *stream) Read(b []byte) (int, error) {
+	fp := &frameParser{
+		r:    s.Stream,
+		conn: s.conn,
+	}
 	if s.bytesRemainingInFrame == 0 {
 	parseLoop:
 		for {
-			frame, err := parseNextFrame(s.Stream, nil)
+			frame, err := fp.ParseNext()
 			if err != nil {
 				return 0, err
 			}
 			switch f := frame.(type) {
-			case *headersFrame:
-				// skip HEADERS frames
-				continue
 			case *dataFrame:
+				if s.parsedTrailer {
+					return 0, errors.New("DATA frame received after trailers")
+				}
 				s.bytesRemainingInFrame = f.Length
 				break parseLoop
+			case *headersFrame:
+				if s.conn.perspective == protocol.PerspectiveServer {
+					continue
+				}
+				if s.parsedTrailer {
+					return 0, errors.New("additional HEADERS frame received after trailers")
+				}
+				s.parsedTrailer = true
+				return 0, s.parseTrailer(s.Stream, f.Length)
 			default:
 				s.conn.CloseWithError(quic.ApplicationErrorCode(ErrCodeFrameUnexpected), "")
 				// parseNextFrame skips over unknown frame types
@@ -130,6 +146,7 @@ type requestStream struct {
 	maxHeaderBytes     uint64
 	reqDone            chan<- struct{}
 	disableCompression bool
+	response           *http.Response
 
 	sentRequest   bool
 	requestedGzip bool
@@ -145,6 +162,7 @@ func newRequestStream(
 	decoder *qpack.Decoder,
 	disableCompression bool,
 	maxHeaderBytes uint64,
+	rsp *http.Response,
 ) *requestStream {
 	return &requestStream{
 		stream:             str,
@@ -153,6 +171,7 @@ func newRequestStream(
 		decoder:            decoder,
 		disableCompression: disableCompression,
 		maxHeaderBytes:     maxHeaderBytes,
+		response:           rsp,
 	}
 }
 
@@ -177,7 +196,11 @@ func (s *requestStream) SendRequestHeader(req *http.Request) error {
 }
 
 func (s *requestStream) ReadResponse() (*http.Response, error) {
-	frame, err := parseNextFrame(s.Stream, nil)
+	fp := &frameParser{
+		r:    s.Stream,
+		conn: s.conn,
+	}
+	frame, err := fp.ParseNext()
 	if err != nil {
 		s.Stream.CancelRead(quic.StreamErrorCode(ErrCodeFrameError))
 		s.Stream.CancelWrite(quic.StreamErrorCode(ErrCodeFrameError))
@@ -205,9 +228,8 @@ func (s *requestStream) ReadResponse() (*http.Response, error) {
 		s.conn.CloseWithError(quic.ApplicationErrorCode(ErrCodeGeneralProtocolError), "")
 		return nil, fmt.Errorf("http3: failed to decode response headers: %w", err)
 	}
-
-	res, err := responseFromHeaders(hfs)
-	if err != nil {
+	res := s.response
+	if err := updateResponseFromHeaders(res, hfs); err != nil {
 		s.Stream.CancelRead(quic.StreamErrorCode(ErrCodeMessageError))
 		s.Stream.CancelWrite(quic.StreamErrorCode(ErrCodeMessageError))
 		return nil, fmt.Errorf("http3: invalid response: %w", err)
@@ -215,26 +237,15 @@ func (s *requestStream) ReadResponse() (*http.Response, error) {
 
 	// Check that the server doesn't send more data in DATA frames than indicated by the Content-Length header (if set).
 	// See section 4.1.2 of RFC 9114.
-	contentLength := int64(-1)
-	if _, ok := res.Header["Content-Length"]; ok && res.ContentLength >= 0 {
-		contentLength = res.ContentLength
-	}
-	respBody := newResponseBody(s.stream, contentLength, s.reqDone)
+	respBody := newResponseBody(s.stream, res.ContentLength, s.reqDone)
 
 	// Rules for when to set Content-Length are defined in https://tools.ietf.org/html/rfc7230#section-3.3.2.
-	_, hasTransferEncoding := res.Header["Transfer-Encoding"]
 	isInformational := res.StatusCode >= 100 && res.StatusCode < 200
 	isNoContent := res.StatusCode == http.StatusNoContent
 	isSuccessfulConnect := s.isConnect && res.StatusCode >= 200 && res.StatusCode < 300
-	if !hasTransferEncoding && !isInformational && !isNoContent && !isSuccessfulConnect {
-		res.ContentLength = -1
-		if clens, ok := res.Header["Content-Length"]; ok && len(clens) == 1 {
-			if clen64, err := strconv.ParseInt(clens[0], 10, 64); err == nil {
-				res.ContentLength = clen64
-			}
-		}
+	if (isInformational || isNoContent || isSuccessfulConnect) && res.ContentLength == -1 {
+		res.ContentLength = 0
 	}
-
 	if s.requestedGzip && res.Header.Get("Content-Encoding") == "gzip" {
 		res.Header.Del("Content-Encoding")
 		res.Header.Del("Content-Length")
@@ -250,7 +261,7 @@ func (s *requestStream) ReadResponse() (*http.Response, error) {
 
 func (s *stream) SendDatagram(b []byte) error {
 	// TODO: reject if datagrams are not negotiated (yet)
-	return s.conn.sendDatagram(s.Stream.StreamID(), b)
+	return s.datagrams.Send(b)
 }
 
 func (s *stream) ReceiveDatagram(ctx context.Context) ([]byte, error) {
