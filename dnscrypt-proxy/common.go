@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 )
 
@@ -40,6 +41,7 @@ var (
 var (
 	FileDescriptors   = make([]*os.File, 0)
 	FileDescriptorNum = uintptr(0)
+	FileDescriptorsMu sync.Mutex
 )
 
 const (
@@ -144,6 +146,8 @@ func TrimAndStripInlineComments(str string) string {
 	return strings.TrimSpace(str)
 }
 
+// ExtractHostAndPort parses a string containing a host and optional port.
+// If no port is present or cannot be parsed, the defaultPort is returned.
 func ExtractHostAndPort(str string, defaultPort int) (host string, port int) {
 	host, port = str, defaultPort
 	if idx := strings.LastIndex(str, ":"); idx >= 0 && idx < len(str)-1 {
@@ -154,11 +158,14 @@ func ExtractHostAndPort(str string, defaultPort int) (host string, port int) {
 	return
 }
 
+// ReadTextFile reads a file and returns its contents as a string.
+// It automatically removes UTF-8 BOM if present.
 func ReadTextFile(filename string) (string, error) {
 	bin, err := os.ReadFile(filename)
 	if err != nil {
 		return "", err
 	}
+	// Remove UTF-8 BOM if present
 	bin = bytes.TrimPrefix(bin, []byte{0xef, 0xbb, 0xbf})
 	return string(bin), nil
 }

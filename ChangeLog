@@ -1,3 +1,49 @@
+# Version 2.1.12
+ - A new Weighted Power of Two (WP2) load balancing strategy has been
+implemented as the default, providing improved distribution across resolvers.
+ - An optional Prometheus metrics endpoint has been added for monitoring and
+observability.
+ - Memory usage for the cache has been reduced.
+ - The monitoring dashboard has received significant improvements including
+better security, performance optimizations, WebSocket rate limiting, and HTTP
+caching headers.
+ - The monitoring UI has been refined with stable sorting to prevent
+flickering, query type limitations, and improved scrolling behavior.
+ - Additional records in queries are now properly removed before forwarding.
+ - The simple view UI has been removed as it provided limited utility.
+
+# Version 2.1.11
+ - The sievecache dependency was updated to fix a bug causing the cache to crash.
+
+# Version 2.1.10
+ - Hot-reloading of configuration files is now optional and disabled by default.
+It can be enabled by setting `enable_hot_reload = true` in the configuration file.
+ - The file system monitoring for hot-reloading now uses efficient OS-native 
+file notifications instead of polling, reducing CPU usage and improving responsiveness.
+
+# Version 2.1.9
+ - A live web-based monitoring UI has been added, allowing you to monitor DNS
+query activity and performance metrics through an interactive dashboard.
+ - Hot-reloading of configuration files has been implemented, allowing you to
+modify filtering rules and other configurations without restarting the proxy.
+Simply edit a configuration file (like blocked-names.txt) and changes are
+applied instantaneously.
+ - HTTP/3 probing is now supported via the `http3_probe` option, which will
+try HTTP/3 first for DoH servers, even if they don't advertise support via
+Alt-Svc.
+ - Authentication for the monitoring UI can be disabled by setting the
+username to an empty string in the configuration.
+ - Several race conditions have been fixed.
+ - Dependencies have been updated.
+ - DHCP DNS detector instances have been reduced to improve performance.
+ - Tor isolation for dnscrypt-proxy has been documented to enhance privacy.
+ - The default example configuration file has been improved for clarity and
+usability.
+ - The cache lock contention has been reduced to improve performance under
+high load.
+ - generate-domains-blocklist: added parallel downloading of block lists for
+significantly improved performance.
+
 # Version 2.1.8
  - Dependencies have been updated, notably the QUIC implementation,
 which could be vulnerable to denial-of-service attacks.
