@@ -461,7 +461,7 @@ func ConfigLoad(proxy *Proxy, flags *ConfigFlags) error {
 	if len(proxy.userName) > 0 && !proxy.child {
 		proxy.dropPrivilege(proxy.userName, FileDescriptors)
 		return errors.New(
-			"Dropping privileges is not supporting on this operating system. Unset `user_name` in the configuration file",
+			"Dropping privileges is not supported on this operating system. Unset `user_name` in the configuration file",
 		)
 	}
 
@@ -471,7 +471,7 @@ func ConfigLoad(proxy *Proxy, flags *ConfigFlags) error {
 			return err
 		}
 		if len(proxy.registeredServers) == 0 {
-			return errors.New("None of the servers listed in the server_names list was found in the configured sources.")
+			return errors.New("None of the servers listed in the server_names list were found in the configured sources.")
 		}
 	}
 

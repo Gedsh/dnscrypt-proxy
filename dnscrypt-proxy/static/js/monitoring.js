@@ -64,11 +64,19 @@ function handleError(error) {
     }
 }
 
+// Cache for the last non-empty recent queries
+let lastRecentQueries = [];
+
 // Safe update function that handles missing data
 function safeUpdateDashboard(data) {
     try {
         if (!data) {
             console.error('No data provided to safeUpdateDashboard');
+            return;
+        }
+
+        if (data.type === 'pong') {
+            console.log('Received pong message');
             return;
         }
 
@@ -88,11 +96,13 @@ function safeUpdateDashboard(data) {
 
         // Update overview stats with null checks
         const totalQueries = data.total_queries !== undefined ? data.total_queries : 0;
+        const blockedQueries = data.blocked_queries !== undefined ? data.blocked_queries : 0;
         const qps = data.queries_per_second !== undefined ? data.queries_per_second : 0;
         const uptime = data.uptime_seconds !== undefined ? data.uptime_seconds : 0;
         const avgResponseTime = data.avg_response_time !== undefined ? data.avg_response_time : 0;
 
         document.getElementById('total-queries').textContent = totalQueries.toLocaleString();
+        document.getElementById('blocked-queries').textContent = blockedQueries.toLocaleString();
         document.getElementById('qps').textContent = qps.toFixed(2);
         document.getElementById('uptime').textContent = formatUptime(uptime);
         document.getElementById('avg-response-time').textContent = avgResponseTime.toFixed(2) + ' ms';
@@ -142,9 +152,14 @@ function safeUpdateDashboard(data) {
 
         // Update recent queries table
         const queriesTable = document.getElementById('queries-table').getElementsByTagName('tbody')[0];
+        let queriesToShow = lastRecentQueries;
+        if (data.recent_queries && Array.isArray(data.recent_queries) && data.recent_queries.length > 0) {
+            lastRecentQueries = data.recent_queries;
+            queriesToShow = lastRecentQueries;
+        }
         queriesTable.innerHTML = '';
-        if (data.recent_queries && Array.isArray(data.recent_queries)) {
-            data.recent_queries.slice().reverse().forEach(query => {
+        if (queriesToShow && Array.isArray(queriesToShow)) {
+            queriesToShow.slice().reverse().forEach(query => {
                 const row = queriesTable.insertRow();
                 row.insertCell(0).textContent = query.timestamp ? new Date(query.timestamp).toLocaleTimeString() : '-';
                 row.insertCell(1).textContent = query.domain || '-';
@@ -273,23 +288,23 @@ function connectWebSocket() {
         console.log('WebSocket URL:', wsUrl);
 
         // Create WebSocket connection
-        var ws = new WebSocket(wsUrl);
+        var newWs = new WebSocket(wsUrl);
 
         // Connection opened
-        ws.onopen = function() {
+        newWs.onopen = function() {
             console.log('WebSocket connected successfully');
             wsReconnectAttempts = 0; // Reset reconnect attempts on successful connection
 
             // Send a ping to verify connection
             try {
-                ws.send(JSON.stringify({type: 'ping'}));
+                newWs.send(JSON.stringify({type: 'ping'}));
             } catch (e) {
                 console.error('Error sending ping:', e);
             }
         };
 
         // Listen for messages
-        ws.onmessage = function(event) {
+        newWs.onmessage = function(event) {
             try {
                 if (!event) {
                     console.warn('Received invalid WebSocket event');
@@ -310,12 +325,12 @@ function connectWebSocket() {
         };
 
         // Handle errors
-        ws.onerror = function(error) {
+        newWs.onerror = function(error) {
             console.error('WebSocket error occurred:', error);
         };
 
         // Connection closed
-        ws.onclose = function(event) {
+        newWs.onclose = function(event) {
             console.log('WebSocket disconnected, code:', event.code, 'reason:', event.reason || 'No reason provided');
 
             // Try to reconnect with exponential backoff
@@ -325,10 +340,8 @@ function connectWebSocket() {
                 console.log('Attempting to reconnect in ' + delay + 'ms (attempt ' + wsReconnectAttempts + '/' + maxReconnectAttempts + ')');
 
                 setTimeout(function() {
-                    var newWs = connectWebSocket();
-                    if (newWs) {
-                        // We can't update the global ws variable from here
-                        // Instead, we'll rely on the polling fallback
+                    ws = connectWebSocket();
+                    if (ws) {
                         console.log('New WebSocket connection established');
                     }
                 }, delay);
@@ -337,7 +350,7 @@ function connectWebSocket() {
             }
         };
 
-        return ws;
+        return newWs;
     } catch (error) {
         console.error('Failed to create WebSocket connection:', error);
         return null;
@@ -386,6 +399,7 @@ window.handlePollData = function(data) {
 // Initialize dashboard with default values
 function initializeDashboard() {
     document.getElementById('total-queries').textContent = '0';
+    document.getElementById('blocked-queries').textContent = '0';
     document.getElementById('qps').textContent = '0.00';
     document.getElementById('uptime').textContent = '0s';
     document.getElementById('avg-response-time').textContent = '0.00 ms';
