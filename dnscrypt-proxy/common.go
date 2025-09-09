@@ -161,7 +161,7 @@ func ExtractHostAndPort(str string, defaultPort int) (host string, port int) {
 			host, port = host[:idx], portX
 		}
 	}
-	return
+	return host, port
 }
 
 // ReadTextFile reads a file and returns its contents as a string.
@@ -180,6 +180,9 @@ func isDigit(b byte) bool { return b >= '0' && b <= '9' }
 
 // ExtractClientIPStr extracts client IP string from pluginsState based on protocol
 func ExtractClientIPStr(pluginsState *PluginsState) (string, bool) {
+	if pluginsState.clientAddr == nil {
+		return "", false
+	}
 	switch pluginsState.clientProto {
 	case "udp":
 		return (*pluginsState.clientAddr).(*net.UDPAddr).IP.String(), true
@@ -188,6 +191,15 @@ func ExtractClientIPStr(pluginsState *PluginsState) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// ExtractClientIPStrEncrypted extracts and optionally encrypts client IP string
+func ExtractClientIPStrEncrypted(pluginsState *PluginsState, ipCryptConfig *IPCryptConfig) (string, bool) {
+	ipStr, ok := ExtractClientIPStr(pluginsState)
+	if !ok || ipCryptConfig == nil {
+		return ipStr, ok
+	}
+	return ipCryptConfig.EncryptIPString(ipStr), ok
 }
 
 // FormatLogLine formats a log line based on the specified format (tsv or ltsv)

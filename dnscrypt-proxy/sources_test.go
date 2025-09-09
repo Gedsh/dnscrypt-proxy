@@ -378,7 +378,7 @@ func setupSourceTestCase(t *testing.T, d *SourceTestData, i int,
 		i = (i + 1) % len(d.sources) // make the cached and downloaded fixtures different
 	}
 	prepSourceTestDownload(t, d, e, d.sources[i], downloadTest)
-	return
+	return id, e
 }
 
 func TestNewSource(t *testing.T) {
@@ -475,9 +475,18 @@ func TestPrefetchSources(t *testing.T) {
 		for i := range d.sources {
 			_, e := setupSourceTestCase(t, d, i, nil, downloadTest)
 			e.mtime = d.timeUpd
-			s := &Source{}
-			*s = *e.Source
-			s.bin = nil
+			s := &Source{
+				name:          e.Source.name,
+				urls:          e.Source.urls,
+				format:        e.Source.format,
+				minisignKey:   e.Source.minisignKey,
+				cacheFile:     e.Source.cacheFile,
+				cacheTTL:      e.Source.cacheTTL,
+				prefetchDelay: e.Source.prefetchDelay,
+				refresh:       e.Source.refresh,
+				prefix:        e.Source.prefix,
+				// bin is intentionally left nil
+			}
 			sources = append(sources, s)
 			expects = append(expects, e)
 		}

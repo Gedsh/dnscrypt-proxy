@@ -1,4 +1,10 @@
-# Version 2.1.14 (not released yet)
+# Version 2.1.14
+ - Added support for client IP address encryption in logs using IPCrypt
+(https://ipcrypt-std.github.io/). Three algorithms are supported:
+deterministic, non-deterministic with 8-byte tweak, and extended
+non-deterministic with 16-byte tweak.
+ - Enhanced pattern rule documentation with better examples.
+ - Fixed an issue where nil client addresses could cause crashes.
 
 # Version 2.1.13
  - Fixed race conditions in WebSocket handling for the monitoring dashboard,
