@@ -188,7 +188,8 @@ func configureServerParams(proxy *Proxy, config *Config) {
 	// Configure certificate refresh parameters
 	proxy.certRefreshConcurrency = Max(1, config.CertRefreshConcurrency)
 	proxy.certRefreshDelay = time.Duration(Max(60, config.CertRefreshDelay)) * time.Minute
-	proxy.certRefreshDelayAfterFailure = 10 * time.Second
+	proxy.certRefreshDelayStartFailure = time.Duration(10 * time.Second)
+	proxy.certRefreshDelayAfterFailure = time.Duration(30 * time.Minute)
 	proxy.certIgnoreTimestamp = config.CertIgnoreTimestamp
 	proxy.ephemeralKeys = config.EphemeralKeys
 	proxy.monitoringUI = config.MonitoringUI

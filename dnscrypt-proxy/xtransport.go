@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -10,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"math/rand"
 	"net"
@@ -90,9 +92,10 @@ type XTransport struct {
 	httpProxyFunction        func(*http.Request) (*url.URL, error)
 	tlsClientCreds           DOHClientCreds
 	keyLogWriter             io.Writer
+	ipsCacheFilePath         string
 }
 
-func NewXTransport() *XTransport {
+func NewXTransport(ipsCacheFilePath string) *XTransport {
 	if err := isIPAndPort(DefaultBootstrapResolver); err != nil {
 		panic("DefaultBootstrapResolver does not parse")
 	}
@@ -110,6 +113,7 @@ func NewXTransport() *XTransport {
 		tlsDisableSessionTickets: false,
 		tlsPreferRSA:             false,
 		keyLogWriter:             nil,
+		ipsCacheFilePath:         ipsCacheFilePath,
 	}
 	return &xTransport
 }
@@ -158,6 +162,7 @@ func (xTransport *XTransport) saveCachedIPs(host string, ips []net.IP, ttl time.
 	xTransport.cachedIPs.Lock()
 	item.updatingUntil = nil
 	xTransport.cachedIPs.cache[host] = item
+	xTransport.saveCachedIpsToFile()
 	xTransport.cachedIPs.Unlock()
 	if len(normalized) == 1 {
 		dlog.Debugf("[%s] cached IP [%s], valid for %v", host, normalized[0], ttl)
@@ -185,6 +190,79 @@ func (xTransport *XTransport) markUpdatingCachedIP(host string) {
 		dlog.Debugf("[%s] IP address marked as updating", host)
 	}
 	xTransport.cachedIPs.Unlock()
+}
+
+// Save cached IPs to a file for storing data after the application is stopped
+func (xTransport *XTransport) saveCachedIpsToFile() {
+	file, err := os.OpenFile(xTransport.ipsCacheFilePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		dlog.Infof("Unable to access [%v]: [%v]", xTransport.ipsCacheFilePath, err)
+		return
+	}
+	defer file.Close()
+
+	writer := bufio.NewWriter(file)
+
+	for host, cachedIp := range xTransport.cachedIPs.cache {
+		if cachedIp != nil && cachedIp.ips != nil && cachedIp.expiration != nil {
+			ips := make([]string, len(cachedIp.ips))
+			for i, ip := range cachedIp.ips {
+				ips[i] = ip.String()
+			}
+			line := fmt.Sprintf("%s %s %d\n", host, strings.Join(ips, ","), (*cachedIp.expiration).Unix())
+			_, err := writer.WriteString(line)
+			if err != nil {
+				return
+			}
+		}
+	}
+	_ = writer.Flush()
+}
+
+// ReadCachedIpsFromFile Read cached IPs from a file to minimize plaintext DNS queries
+func (xTransport *XTransport) ReadCachedIpsFromFile() {
+	file, err := os.Open(xTransport.ipsCacheFilePath)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if err == io.EOF {
+				break
+			} else {
+				return
+			}
+		}
+
+		var host string
+		var ipsStr string
+		var unixTime int64
+
+		_, err = fmt.Sscanf(line, "%s %s %d", &host, &ipsStr, &unixTime)
+		if err != nil {
+			continue
+		}
+		expiration := time.Unix(unixTime, 0)
+		parts := strings.Split(ipsStr, ",")
+		ips := make([]net.IP, 0, len(parts))
+		for _, p := range parts {
+			ip := net.ParseIP(p)
+			if ip == nil {
+				continue
+			}
+			ips = append(ips, ip)
+		}
+		item := &CachedIPItem{ips: ips, expiration: &expiration}
+
+		xTransport.cachedIPs.Lock()
+		xTransport.cachedIPs.cache[host] = item
+		xTransport.cachedIPs.Unlock()
+	}
 }
 
 func (xTransport *XTransport) loadCachedIPs(host string) (ips []net.IP, expired bool, updating bool) {
@@ -559,19 +637,18 @@ func (xTransport *XTransport) resolve(host string, returnIPv4, returnIPv6 bool) 
 	if xTransport.mainProto == "tcp" {
 		protos = []string{"tcp", "udp"}
 	}
-	if xTransport.ignoreSystemDNS {
-		if xTransport.internalResolverReady.Load() {
-			for _, proto := range protos {
-				ips, ttl, err = xTransport.resolveUsingServers(proto, host, xTransport.internalResolvers, returnIPv4, returnIPv6)
-				if err == nil {
-					break
-				}
+	if xTransport.internalResolverReady.Load() {
+		for _, proto := range protos {
+			ips, ttl, err = xTransport.resolveUsingServers(proto, host, xTransport.internalResolvers, returnIPv4, returnIPv6)
+			if err == nil {
+				break
 			}
-		} else {
-			err = errors.New("dnscrypt-proxy service is not usable yet")
-			dlog.Notice(err)
 		}
 	} else {
+		err = errors.New("dnscrypt-proxy service is not usable yet")
+		dlog.Notice(err)
+	}
+	if err != nil && !xTransport.ignoreSystemDNS {
 		ips, ttl, err = xTransport.resolveUsingSystem(host, returnIPv4, returnIPv6)
 		if err != nil {
 			err = errors.New("System DNS is not usable yet")
@@ -687,7 +764,7 @@ func (xTransport *XTransport) Fetch(
 			}
 		}
 	}
-	header := map[string][]string{"User-Agent": {"dnscrypt-proxy"}}
+	header := map[string][]string{"User-Agent": {""}}
 	if len(accept) > 0 {
 		header["Accept"] = []string{accept}
 	}

@@ -378,7 +378,13 @@ func ConfigLoad(proxy *Proxy, flags *ConfigFlags) error {
 	proxy.userName = config.UserName
 	proxy.child = *flags.Child
 	proxy.enableHotReload = config.EnableHotReload
-	proxy.xTransport = NewXTransport()
+	configFilePath := *flags.ConfigFile
+	ipsCacheFilePath := "ips-cache.tmp"
+	if parentDirSymbolIndex := strings.LastIndex(configFilePath, "/"); parentDirSymbolIndex >= 0 {
+		ipsCacheFilePath = configFilePath[:parentDirSymbolIndex+1] + ipsCacheFilePath
+	}
+	proxy.xTransport = NewXTransport(ipsCacheFilePath)
+	proxy.xTransport.ReadCachedIpsFromFile()
 
 	// Configure logging
 	configureLogging(proxy, flags, &config)
