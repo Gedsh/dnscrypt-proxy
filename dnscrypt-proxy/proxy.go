@@ -110,6 +110,7 @@ type Proxy struct {
 	listenersMu                   sync.Mutex
 	ipCryptConfig                 *IPCryptConfig
 	udpConnPool                   *UDPConnPool
+	netMonitor                    *networkMonitor
 }
 
 func (proxy *Proxy) registerUDPListener(conn *net.UDPConn) {
@@ -262,6 +263,9 @@ func (proxy *Proxy) addLocalDoHListener(listenAddrStr string) {
 
 func (proxy *Proxy) StartProxy() {
 	proxy.questionSizeEstimator = NewQuestionSizeEstimator()
+	proxy.netMonitor = newNetworkMonitor()
+	proxy.netMonitor.init()
+	go proxy.netMonitor.start(context.Background(), defaultNetworkMonitorInterval)
 	if _, err := crypto_rand.Read(proxy.proxySecretKey[:]); err != nil {
 		dlog.Fatal(err)
 	}
@@ -595,6 +599,7 @@ func (proxy *Proxy) exchangeWithUDPServer(
 	sharedKey *[32]byte,
 	encryptedQuery []byte,
 	clientNonce []byte,
+	queryEpoch uint64,
 ) ([]byte, error) {
 	upstreamAddr := serverInfo.UDPAddr
 	if serverInfo.Relay != nil && serverInfo.Relay.Dnscrypt != nil {
@@ -603,7 +608,7 @@ func (proxy *Proxy) exchangeWithUDPServer(
 
 	proxyDialer := proxy.xTransport.proxyDialer
 	if proxyDialer != nil {
-		return proxy.exchangeWithUDPServerViaProxy(serverInfo, sharedKey, encryptedQuery, clientNonce, upstreamAddr, proxyDialer)
+		return proxy.exchangeWithUDPServerViaProxy(serverInfo, sharedKey, encryptedQuery, clientNonce, queryEpoch, upstreamAddr, proxyDialer)
 	}
 
 	pc, err := proxy.udpConnPool.Get(upstreamAddr)
@@ -645,7 +650,7 @@ func (proxy *Proxy) exchangeWithUDPServer(
 
 	proxy.udpConnPool.Put(upstreamAddr, pc)
 
-	return proxy.Decrypt(serverInfo, sharedKey, encryptedResponse, clientNonce)
+	return proxy.Decrypt(serverInfo, sharedKey, encryptedResponse, clientNonce, queryEpoch)
 }
 
 func (proxy *Proxy) exchangeWithUDPServerViaProxy(
@@ -653,6 +658,7 @@ func (proxy *Proxy) exchangeWithUDPServerViaProxy(
 	sharedKey *[32]byte,
 	encryptedQuery []byte,
 	clientNonce []byte,
+	queryEpoch uint64,
 	upstreamAddr *net.UDPAddr,
 	proxyDialer *netproxy.Dialer,
 ) ([]byte, error) {
@@ -680,7 +686,7 @@ func (proxy *Proxy) exchangeWithUDPServerViaProxy(
 		}
 		dlog.Debugf("[%v] Retry on timeout", serverInfo.Name)
 	}
-	return proxy.Decrypt(serverInfo, sharedKey, encryptedResponse, clientNonce)
+	return proxy.Decrypt(serverInfo, sharedKey, encryptedResponse, clientNonce, queryEpoch)
 }
 
 func (proxy *Proxy) exchangeWithTCPServer(
@@ -688,6 +694,7 @@ func (proxy *Proxy) exchangeWithTCPServer(
 	sharedKey *[32]byte,
 	encryptedQuery []byte,
 	clientNonce []byte,
+	queryEpoch uint64,
 ) ([]byte, error) {
 	upstreamAddr := serverInfo.TCPAddr
 	if serverInfo.Relay != nil && serverInfo.Relay.Dnscrypt != nil {
@@ -722,7 +729,7 @@ func (proxy *Proxy) exchangeWithTCPServer(
 	if err != nil {
 		return nil, err
 	}
-	return proxy.Decrypt(serverInfo, sharedKey, encryptedResponse, clientNonce)
+	return proxy.Decrypt(serverInfo, sharedKey, encryptedResponse, clientNonce, queryEpoch)
 }
 
 func (proxy *Proxy) clientsCountInc() bool {
