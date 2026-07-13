@@ -192,6 +192,7 @@ func configureServerParams(proxy *Proxy, config *Config) {
 	proxy.certRefreshDelayStartFailure = time.Duration(10 * time.Second)
 	proxy.certRefreshDelayAfterFailure = time.Duration(30 * time.Minute)
 	proxy.certIgnoreTimestamp = config.CertIgnoreTimestamp
+	proxy.pqDNSCrypt = config.PQDNSCrypt
 	proxy.ephemeralKeys = config.EphemeralKeys
 	proxy.monitoringUI = config.MonitoringUI
 }
