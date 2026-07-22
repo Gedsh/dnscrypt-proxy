@@ -100,6 +100,7 @@ type Proxy struct {
 	showCerts                     bool
 	pqDNSCrypt                    bool
 	certIgnoreTimestamp           bool
+	forceTCP                      bool
 	skipAnonIncompatibleResolvers bool
 	anonDirectCertFallback        bool
 	pluginBlockUndelegated        bool
