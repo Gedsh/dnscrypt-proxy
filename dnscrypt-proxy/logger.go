@@ -25,6 +25,14 @@ func Logger(logMaxSize int, logMaxAge int, logMaxBackups int, fileName string) i
 		}
 		return fp
 	}
+	// Create the file before lumberjack does: it only opens it on the first write, where errors get discarded.
+	// This also keeps the mode at 0644 instead of lumberjack's 0600.
+	// Logs are meant to stay readable by regular users; restricting access is the parent directory's job.
+	if fp, err := os.OpenFile(fileName, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644); err == nil {
+		fp.Close()
+	} else {
+		dlog.Errorf("Unable to create [%v]: [%v]", fileName, err)
+	}
 	logger := &lumberjack.Logger{
 		LocalTime:  true,
 		MaxSize:    logMaxSize,
