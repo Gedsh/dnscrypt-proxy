@@ -3,7 +3,7 @@
 package main
 
 import (
-	"github.com/coreos/go-systemd/daemon"
+	"github.com/coreos/go-systemd/v22/daemon"
 	clocksmith "github.com/jedisct1/go-clocksmith"
 )
 

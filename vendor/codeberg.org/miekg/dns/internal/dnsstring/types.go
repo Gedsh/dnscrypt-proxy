@@ -67,6 +67,8 @@ const (
 	TypeSVCB       uint16 = 64
 	TypeHTTPS      uint16 = 65
 	TypeDSYNC      uint16 = 66
+	TypeUNECE      uint16 = 69 // Not implemented, see https://www.ietf.org/archive/id/draft-woodcock-faltstrom-external-registry-rrtypes-01.html.
+	TypeISO        uint16 = 70 // Not implemented, see https://www.ietf.org/archive/id/draft-woodcock-faltstrom-external-registry-rrtypes-01.html.
 	TypeSPF        uint16 = 99
 	TypeUINFO      uint16 = 100
 	TypeUID        uint16 = 101
@@ -133,6 +135,9 @@ const (
 	ECDSAP384SHA384
 	ED25519
 	ED448
+	SM2SM3                // See RFC 9563.
+	MLDSA44               // See draft-westerbaan-dnssec-mldsa.
+	ECCGOST12  uint8 = 23 // See RFC 9558.
 	INDIRECT   uint8 = 252
 	PRIVATEDNS uint8 = 253 // Private (experimental keys)
 	PRIVATEOID uint8 = 254
@@ -153,6 +158,9 @@ var AlgorithmToString = map[uint8]string{
 	ECDSAP384SHA384:  "ECDSAP384SHA384",
 	ED25519:          "ED25519",
 	ED448:            "ED448",
+	SM2SM3:           "SM2SM3",
+	MLDSA44:          "MLDSA44",
+	ECCGOST12:        "ECC-GOST12",
 	INDIRECT:         "INDIRECT",
 	PRIVATEDNS:       "PRIVATEDNS",
 	PRIVATEOID:       "PRIVATEOID",

@@ -165,6 +165,10 @@ func AAAA(aaaa netip.Addr, msg []byte, off int) (int, error) {
 	if off+net.IPv6len > len(msg) {
 		return len(msg), &Error{"overflow AAAA Addr"}
 	}
+	if !aaaa.Is6() {
+		return len(msg), &Error{"bad AAAA Addr"}
+	}
+
 	val := aaaa.As16()
 	_ = msg[off+net.IPv6len-1]
 	msg[off] = val[0]
@@ -194,11 +198,14 @@ func Name(s string, msg []byte, off int, compression map[string]uint16, compress
 	ls := len(s)
 
 	if ls == 1 && s[0] == '.' {
+		if off >= lenmsg {
+			return lenmsg, &Error{"overflow name"}
+		}
 		msg[off] = 0
 		return off + 1, nil
 	}
 	if ls > 0 && s[ls-1] != '.' {
-		return len(msg), &Error{"name must be fully qualified"}
+		return lenmsg, &Error{"name must be fully qualified"}
 	}
 
 	// Each dot ends a segment of the name. We trade each dot byte for a length byte.
@@ -253,20 +260,27 @@ func Name(s string, msg []byte, off int, compression map[string]uint16, compress
 	return off + 1, nil
 }
 
-// MName packs the string s into msg taking escaped dots into account.
+// MName packs the string s into msg taking escaped dots into account. A label may hold any number of
+// escaped dots, \. can never be at the start of the string.
 func MName(s string, msg []byte, off int) (off1 int, err error) {
 	lenmsg := len(msg)
 	ls := len(s)
 
 	if ls == 1 && s[0] == '.' {
+		if off >= lenmsg {
+			return lenmsg, &Error{"overflow name"}
+		}
 		msg[off] = 0
 		return off + 1, nil
 	}
 	if ls > 1 && s[0] == '.' { // leading dots are not legal except for the root zone
-		return len(msg), &Error{"leading dot in mname"}
+		return lenmsg, &Error{"leading dot in mname"}
 	}
-	if s[ls-1] != '.' {
-		return len(msg), &Error{"mname must be fully qualified"}
+	if ls > 2 && s[0] == '\\' && s[1] == '.' { // disallow \. too
+		return lenmsg, &Error{"leading dot in mname"}
+	}
+	if ls > 0 && s[ls-1] != '.' {
+		return lenmsg, &Error{"mname must be fully qualified"}
 	}
 
 	// Each dot ends a segment of the name. We trade each dot byte for a length byte.
@@ -283,22 +297,22 @@ func MName(s string, msg []byte, off int) (off1 int, err error) {
 		if i == -1 {
 			break
 		}
+		i += begin
 
 		escape = 0
-		if i > 0 && s[begin+i-1] == '\\' { // escaped dot
-			if begin+i+2 > ls {
+		for i > begin && s[i-1] == '\\' { // escaped dot, a label may hold several
+			if i+2 > ls {
 				return lenmsg, &Error{"overflow mname after escape"}
 			}
-			j := strings.IndexByte(s[begin+i+1:], '.') // search ahead for another dot
+			j := strings.IndexByte(s[i+1:], '.') // search ahead for another dot
 			if j == -1 {
-				break // no dot found, break as above
+				return lenmsg, &Error{"overflow mname after escape"}
 			}
 			// i is the end of the label, 1 for \
 			i += 1 + j
-			escape = 1
+			escape++
 		}
 
-		i += begin
 		labelLen = i - begin - escape
 
 		if labelLen >= 1<<6 { // top two bits of length must be clear

@@ -44,15 +44,6 @@ func Escape(b byte) string {
 	return escapedByteLarge[int(b)*4 : int(b)*4+4]
 }
 
-// ShouldEscape returns true if a domain name label byte should be prefixed with an escaping backslash.
-func ShouldEscape(b byte) bool {
-	switch b {
-	case '.', ' ', '\'', '@', ';', '(', ')', '"', '\\':
-		return true
-	}
-	return false
-}
-
 func Next(s string, offset int) (byte, int) {
 	if offset >= len(s) {
 		return 0, 0

@@ -52,21 +52,25 @@ func (t *Transport) dial(ctx context.Context, network, address string) (net.Conn
 }
 
 // isEOFOrClosedNetwork returns true if the error err is an io.EOF or a *net.OpError with the
-// text 'use of closed network connection'.
+// text 'use of closed network connection' or a time out has been reached.
 func isEOFOrClosedNetwork(err error) bool {
 	if errors.Is(err, io.EOF) {
 		return true
 	}
-	if _, ok := err.(*net.OpError); ok {
-		if strings.Contains(err.Error(), "use of closed network connection") {
-			return true
-		}
+
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		return true
 	}
+
+	if _, ok := err.(*net.OpError); ok && strings.Contains(err.Error(), "use of closed network connection") {
+		return true
+	}
+
 	return false
 }
 
-// Tranfer defines the signing parameters that are used during a zone transfer.
-type Transfer struct {
+// TranferOption defines the signing and other parameters that are used during a zone transfer.
+type TransferOption struct {
 	// If non zero, TSIG signing and verification is done on messages that have a TSIG record in the pseudo section.
 	TSIGSigner
 	// If non zero SIG0 signing and verification is done on messages that have a SIG0 record in the pseudo section.

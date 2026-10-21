@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
+	"crypto/mldsa"
 	"crypto/rsa"
 	"math/big"
 	"sort"
@@ -173,24 +174,40 @@ func (k *DNSKEY) publicKeyED25519() ed25519.PublicKey {
 	return keybuf
 }
 
-// Return the raw signature data.
+func (k *DNSKEY) publicKeyMLDSA44() *mldsa.PublicKey {
+	keybuf, err := pack.Base64([]byte(k.PublicKey))
+	if err != nil {
+		return nil
+	}
+	pubkey, err := mldsa.NewPublicKey(mldsa.MLDSA44(), keybuf)
+	if err != nil {
+		return nil
+	}
+	return pubkey
+}
+
+// Return the raw signature data. TTL and original ownername are restored.
 func rawSignatureData(buf []byte, rrset []RR, s *RRSIG) (off int, err error) {
 	for _, rr := range rrset {
+		ttl := rr.Header().TTL
+		defer func() { rr.Header().TTL = ttl }()
 		rr.Header().TTL = s.OrigTTL
 		labels := dnsutilLabels(rr.Header().Name)
 		if skip := labels - int(s.Labels); skip > 0 {
 			orig := rr.Header().Name
+			defer func() { rr.Header().Name = orig }()
 			// 6.2. Canonical RR Form. (4) - wildcards
 			// Wildcard, trim to s.Labels from the left and substitute '*'
-			stop := false
+			cut, stop := 0, false
 			for range skip {
-				off, stop = dnsutilNext(rr.Header().Name, off)
+				cut, stop = dnsutilNext(rr.Header().Name, cut)
 			}
+			off = cut
 			if !stop { // if stop we jumped past
 				rr.Header().Name = "*." + rr.Header().Name[off:]
-				defer func() { rr.Header().Name = orig }()
 			}
 		}
+
 		canonicalize(rr)
 	}
 

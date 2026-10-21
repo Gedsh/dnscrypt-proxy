@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/mldsa"
 	"crypto/rsa"
 	"fmt"
 	"io"
@@ -19,9 +20,6 @@ import (
 // NewPrivate returns a crypto.PrivateKey by parsing the string s.
 // s should be in the same form of the BIND private key files.
 func (k *DNSKEY) NewPrivate(s string) (crypto.PrivateKey, error) {
-	if s == "" || s[len(s)-1] != '\n' { // We need a closing newline
-		return k.readPrivate(strings.NewReader(s+"\n"), "")
-	}
 	return k.readPrivate(strings.NewReader(s), "")
 }
 
@@ -70,6 +68,8 @@ func (k *DNSKEY) readPrivate(q io.Reader, file string) (crypto.PrivateKey, error
 		return priv, nil
 	case ED25519:
 		return readPrivateKeyED25519(m)
+	case MLDSA44:
+		return readPrivateKeyMLDSA44(m)
 	default:
 		return nil, ErrAlg
 	}
@@ -146,6 +146,28 @@ func readPrivateKeyED25519(m map[string]string) (ed25519.PrivateKey, error) {
 	return p, nil
 }
 
+func readPrivateKeyMLDSA44(m map[string]string) (*mldsa.PrivateKey, error) {
+	var p *mldsa.PrivateKey
+	for k, v := range m {
+		switch k {
+		case "privatekey":
+			p1, err := pack.Base64([]byte(v))
+			if err != nil {
+				return nil, err
+			}
+			if len(p1) != mldsa.PrivateKeySize {
+				return nil, fmt.Errorf("mldsa seed size error")
+			}
+			if p, err = mldsa.NewPrivateKey(mldsa.MLDSA44(), p1); err != nil {
+				return nil, err
+			}
+		case "created", "publish", "activate":
+			/* not used in Go (yet) */
+		}
+	}
+	return p, nil
+}
+
 // parseKey reads a private key from r. It returns a map[string]string,
 // with the key-value pairs, or an error when the file is not correct.
 func parseKey(r io.Reader, file string) (map[string]string, error) {
@@ -178,8 +200,8 @@ type klexer struct {
 
 	readErr error
 
-	line   uint32
-	column uint16
+	line   int
+	column int
 
 	key bool
 	eol bool // end-of-line

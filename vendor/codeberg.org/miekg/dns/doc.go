@@ -1,17 +1,17 @@
 /*
-Package dns implements a full featured interface to the Domain Name System. Both server- and client-side
-programming is supported.
+Package dns implements a full featured interface to the Domain Name System - DNS (RFC 1033, RFC 1034, RFC 1035).
+Both server- and client-side programming is supported.
 
 The package allows complete control over what is sent out to the DNS. The API follows the less-is-more
 principle, by presenting a small, clean interface.
 
 It supports (asynchronous) querying/replying, incoming/outgoing zone transfers,
-[TSIG], EDNS0, dynamic updates, notifies and DNSSEC validation/signing.
+[TSIG], [EDNS0], dynamic updates, notifies and DNSSEC validation/signing.
 
 Resource records ([RR]s) are native types. They are not stored in wire format, but every [Msg] holds the
-wire-format in its Data field. Everything is modelled or made to look like an RR: the question section holds a
-[RR] and the [EDNS0] option codes are also (fake/pseudo) RRs. These EDNS0 option occupy a separate section in
-[Msg], the pseudo section.
+wire-format in its [Msg.Data] field. Everything is modelled or made to look like an RR: the question section holds a
+[RR] and the [EDNS0] option codes are also RRs. These EDNS0 options occupy a separate section in
+[Msg], the [Msg.Pseudo] section.
 
 In the DNS, messages ([Msg]) are exchanged, these messages contain RRs ([RR]) and/or RRsets ([RRset]). Basic
 pattern for creating a message:
@@ -38,11 +38,11 @@ configured on 127.0.0.1 and port 53 using UDP:
 When this functions returns you will get DNS message back. A DNS message consists out of four (on the wire),
 but five in this package, sections.
 
-  - The question section: r.Question.
-  - The answer section: r.Answer.
-  - The authority section: r.Ns.
-  - The additional section: r.Extra.
-  - And the extra and new, the pseudo section: r.Pseudo, see [Msg].
+  - The question section: r.Question, see [Msg.Question].
+  - The answer section: r.Answer, see [Msg.Answer].
+  - The authority section: r.Ns, see [Msg.Ns].
+  - The additional section: r.Extra, see [Msg.Extra].
+  - And the extra and new, the pseudo section: r.Pseudo, see [Msg.Pseudo].
 
 The latter was added to make it easier to deal with [EDNS0] option codes, which become more and more prevalent.
 
@@ -106,7 +106,7 @@ RRs.
 		}
 	}
 
-Unknown options are dealt with and added as [ERFC3597] RRs, simular to actual unknown [RR]s are handled with
+Unknown options are dealt with and added as [ERFC3597] RRs, simular to actual unknown RRs are handled with
 [RFC3597].
 
 # Private Resource Records

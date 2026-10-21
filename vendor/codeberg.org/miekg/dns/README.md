@@ -5,9 +5,16 @@
 
 > Less is more.
 
+This work is partly funded by the [Nominet DNS Fund](https://nominet.uk/our-impact/nominet-dns-fund/).
+
 Complete and usable DNS library. All Resource Records are supported, including the DNSSEC types. It follows a
 lean and mean philosophy. Server side and client side programming is supported, i.e. you can build servers and
 resolvers with it.
+
+We try to keep the _main_ branch as sane as possible and at the bleeding edge of standards, avoiding
+breaking changes wherever reasonable. We rigorously follow upstream Go versions and use bleeding edge Go
+language features. But because this version is young, we allow ourselves some more headroom for
+making backwards incompatible changes.
 
 Many convenience functions are included in _dns_, _dnstest_ or otherwise in _dnsutils_. The RR's resource data
 (RDATA) is split off into its own package: _rdata_. This means accessing the RR's header and rdata is much
@@ -15,14 +22,13 @@ simpler now. [^a]
 
 [^a]: A function is put in _dnsutils_, unless (due to cyclic imports) it is utterly impossible to put it there. Only then it is put in the main _dns_ package.
 
-We try to keep the "main" branch as sane as possible and at the bleeding edge of standards, avoiding breaking
-changes wherever reasonable. But because this version is young, we allow ourselves some more headroom for
-making backwards incompatible changes.
-
-Example programs are included _and_ benchmarked in `cmd`.
+Example programs are included _and_ benchmarked in
+[`cmd`](https://codeberg.org/miekg/dns/src/branch/main/cmd). And
 [`cmd/atomdns`](https://codeberg.org/miekg/dns/src/branch/main/cmd/atomdns/README.md) is a full blown
 production ready name server. Because of these we are depending on a lot more external packages - at some
 point these servers will be split off.
+
+Also [see the Go documentation](https://pkg.go.dev/codeberg.org/miekg/dns).
 
 This new version will not soon see a v1.0.0 release because I want to be able to still make changes. In a
 year or two (2028?) when things have stabilized it will be blessed with a v1.0.0.
@@ -32,6 +38,11 @@ year or two (2028?) when things have stabilized it will be blessed with a v1.0.0
 Everything from <https://github.com/miekg/dns> works. See
 [README-v1-to-v2.md](https://codeberg.org/miekg/dns/src/branch/main/_doc/README-v1-to-v2.md)
 for the differences, if you are porting your application, in `cookbook.go` are some common recipes.
+
+Note that a design choice has been made to not supported `\DDD` and `\x` syntax in domain names. This archaic
+way of encoding names was useful way-back-when, nowadays DNS is pretty much a 7-bit protocol and things like
+[Punycode](https://en.wikipedia.org/wiki/Punycode) had to be invented. There is one exception to this and that
+is the SOA's mname can contain a `\.`, for the rest it is ignore and interpreted as `\` and `.`.
 
 ## Performance
 
@@ -48,15 +59,16 @@ For developers please read the
 
 - KISS.
 - Everything is a resource record, EDNS0 pseudo RRs included.
-  - Easy way to access RR's header and resource data (rdata).
+  - Easy way to access RR's header and resource data (_rdata_ package).
 - Small API.
   - Package _dnsutil_ contains functions that help programmers, but are not necessarily in scope the _dns_ package.
   - Package _dnstest_ contains functions and types that help you test, similar to the _httptest_ package.
-  - Package _svcb_ holds all details of the SVCB/HTTPS record.
+  - Package _dnsjson_ contains types for DNS RRs in JSON (RFC 8427).
+  - Package _svcb_ holds all details of the SVCB/HTTPS record (RFC 9460).
   - Pacakge _deleg_ holds details for the DELEG record.
   - Many helper/debug functions are moved into _internal_ packages, making the top-level much, much cleaner.
 - Fast.
-  - recvmmsg(2) and TCP pipe=lining support.
+  - recvmmsg(2) and TCP pipe-lining support.
   - The `cmd/reflect` server does ~420K/340K qps UDP/TCP respectively on the right hardware.
     - Since a46996c I can get ~400K (UDP) qps on my laptop (M2/Asahi Linux), also see 1766e44, 86b53fe and 06e5e0f.
     - On my Dell XPS 17 (Intel) it is similar-ish (~310K/250K qps UDP/TCP).
@@ -70,7 +82,7 @@ For developers please read the
 
 A not-so-up-to-date-list-that-may-be-actually-current:
 
-- atomdns - included in cmd/atomdns - a high performance DNS server, based on the principles of CoreDNS, but
+- atomdns - included in [`cmd/atomdns`](https://codeberg.org/miekg/dns/src/branch/main/cmd/atomdns/) - a high performance DNS server, based on the principles of CoreDNS, but
   faster and simpler.
 - [dnscrypt-proxy](https://github.com/DNSCrypt/dnscrypt-proxy) - a flexible DNS proxy, with support for
   encrypted DNS protocols such as DNSCrypt v2, DOH, Anonymized DNSCrypt and
@@ -103,7 +115,7 @@ What users say:
 - Server side programming (mimicking the net/http package), with `dns.Handle` and `dns.HandleFunc` allowing
   for middleware servers.
 - Client side programming.
-- DNSSEC: signing, validating and key generation for DSA, RSA, ECDSA and Ed25519.
+- DNSSEC: signing, validating and key generation for DSA, RSA, ECDSA, Ed25519 and ML-DSA-44.
 - EDNS0, NSID, Cookies, etc, as pseudo RRs in the (fake) pseudo section.
 - AXFR/IXFR.
 - TSIG, SIG(0).
@@ -111,7 +123,6 @@ What users say:
 - DNS over HTTP (DOH), see the _dnshttp_ package.
 - Improved naming by embracing sub-packages.
 - Improved RRs, by having the rdata specified in an _rdata_ package.
-- Examples included the cmd/ directory.
 - Escapes (\DDD and \x) in domain names is not supported (anymore) - the overhead (50-100%) was too high.
 - Easy way for custom RRs and EDNS0 pseudo RRs.
 
@@ -144,8 +155,8 @@ developed in tandem with the library.
 
 _all of them_ and _then some_
 
-- 103{4,5} - DNS standard
-- 1348 - NSAP record (removed the record)
+- 103{3,4,5} - DNS standard
+- <s>1348 - NSAP record</s>
 - 1982 - Serial Arithmetic
 - 1876 - LOC record
 - 1995 - IXFR
@@ -202,22 +213,29 @@ _all of them_ and _then some_
 - 7871 - EDNS0 Client Subnet
 - 7873 - Domain Name System (DNS) Cookies
 - 8080 - EdDSA for DNSSEC
+- 8145 - EDNS0 key tag
+- 8427 - Representing DNS Messages in JSON
 - 8482 - Minimal Answers for ANY
 - 8484 - DOH
 - 8499 - DNS Terminology
+- 8509 - DNSSEC Trusted Key Sentinel
 - 8659 - DNS Certification Authority Authorization (CAA) Resource Record
 - 8777 - DNS Reverse IP Automatic Multicast Tunneling (AMT) Discovery
 - 8914 - Extended DNS Errors
 - 8976 - Message Digest for DNS Zones (ZONEMD RR)
+- 9267 - Common Implementation Anti-Patterns
 - 9250 - DOQ (not implemented, waiting until Go supports QUIC)
 - 9461 - Service Binding Mapping for DNS Servers
 - 9462 - Discovery of Designated Resolvers
 - 9460 - SVCB and HTTPS Records
 - 9499 - DNS Terminology
+- 9558 - GOST 2012 for DNSSEC
+- 9563 - SM2 for DNSSEC
 - 9567 - DNS Error Reporting
 - 9606 - DNS Resolver Information
 - 9660 - Zone version
 - 9715 - IP Fragmentation Avoidance in DNS over UDP
+- 9824 - Compact Denial of Existence in DNSSEC
 - 9859 - DSYNC RR
-- draft-ietf-compact-denial - CO bit
 - draft-ietf-deleg - DELEG RR
+- draft-westerbaan-dnssec-mldsa-04 - MLDSA for DNSSEC

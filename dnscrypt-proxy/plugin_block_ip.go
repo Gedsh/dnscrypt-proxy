@@ -7,13 +7,13 @@ import (
 	"sync"
 
 	"codeberg.org/miekg/dns"
-	iradix "github.com/hashicorp/go-immutable-radix"
+	iradix "github.com/hashicorp/go-immutable-radix/v2"
 	"github.com/jedisct1/dlog"
 	"github.com/k-sone/critbitgo"
 )
 
 type PluginBlockIP struct {
-	blockedPrefixes *iradix.Tree
+	blockedPrefixes *iradix.Tree[struct{}]
 	blockedIPs      map[string]any
 	blockedNetworks *critbitgo.Net
 	logger          io.Writer
@@ -24,7 +24,7 @@ type PluginBlockIP struct {
 	rwLock          sync.RWMutex
 	configFile      string
 	configWatcher   *ConfigWatcher
-	stagingPrefixes *iradix.Tree
+	stagingPrefixes *iradix.Tree[struct{}]
 	stagingIPs      map[string]any
 	stagingNetworks *critbitgo.Net
 }
@@ -46,7 +46,7 @@ func (plugin *PluginBlockIP) Init(proxy *Proxy) error {
 		return err
 	}
 
-	plugin.blockedPrefixes = iradix.New()
+	plugin.blockedPrefixes = iradix.New[struct{}]()
 	plugin.blockedIPs = make(map[string]any)
 	plugin.blockedNetworks = critbitgo.NewNet()
 
@@ -72,7 +72,7 @@ func (plugin *PluginBlockIP) Drop() error {
 func (plugin *PluginBlockIP) PrepareReload() error {
 	return StandardPrepareReloadPattern(plugin.Name(), plugin.configFile, func(lines string) error {
 		// Create staging structures
-		plugin.stagingPrefixes = iradix.New()
+		plugin.stagingPrefixes = iradix.New[struct{}]()
 		plugin.stagingIPs = make(map[string]any)
 		plugin.stagingNetworks = critbitgo.NewNet()
 
@@ -160,7 +160,7 @@ func (plugin *PluginBlockIP) Eval(pluginsState *PluginsState, msg *dns.Msg) erro
 		if rrtype == dns.TypeA {
 			ipStr = answer.(*dns.A).A.Addr.String()
 		} else if rrtype == dns.TypeAAAA {
-			ipStr = answer.(*dns.AAAA).AAAA.Addr.String() // IPv4-mapped IPv6 addresses are converted to IPv4
+			ipStr = answer.(*dns.AAAA).AAAA.Addr.Unmap().String() // IPv4-mapped IPv6 addresses are converted to IPv4
 		}
 		if _, found := plugin.blockedIPs[ipStr]; found {
 			reject, reason = true, ipStr

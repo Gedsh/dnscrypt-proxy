@@ -4,6 +4,7 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/mldsa"
 	"crypto/rand"
 	"crypto/rsa"
 	_ "crypto/sha1"   // need its init function
@@ -34,12 +35,15 @@ const (
 	RSASHA256
 	_ // Skip 9, RFC 6725, section 2.1
 	RSASHA512
-	_ // Skip 11, RFC 6725, section 2.1
-	ECCGOST
+	_       // Skip 11, RFC 6725, section 2.1
+	ECCGOST // Deprecated.
 	ECDSAP256SHA256
 	ECDSAP384SHA384
 	ED25519
 	ED448
+	SM2SM3                // See RFC 9563.
+	MLDSA44               // See draft-westerbaan-dnssec-mldsa.
+	ECCGOST12  uint8 = 23 // See RFC 9558
 	INDIRECT   uint8 = 252
 	PRIVATEDNS uint8 = 253 // Private (experimental keys).
 	PRIVATEOID uint8 = 254
@@ -60,13 +64,16 @@ var AlgorithmToString = map[uint8]string{
 	ECDSAP384SHA384:  "ECDSAP384SHA384",
 	ED25519:          "ED25519",
 	ED448:            "ED448",
+	SM2SM3:           "SM2SM3",
+	MLDSA44:          "MLDSA44",
+	ECCGOST12:        "ECC-GOST12",
 	INDIRECT:         "INDIRECT",
 	PRIVATEDNS:       "PRIVATEDNS",
 	PRIVATEOID:       "PRIVATEOID",
 }
 
 // AlgorithmToHash is a map of algorithm crypto hash IDs to crypto.Hash's.
-// Newer algorithm that do their own hashing (i.e. ED25519) are not present here.
+// Newer algorithm that do their own hashing (i.e. ED25519 and MLDSA44) are not present here.
 var AlgorithmToHash = map[uint8]crypto.Hash{
 	RSAMD5:           crypto.MD5, // Deprecated in RFC 6725.
 	DSA:              crypto.SHA1,
@@ -80,21 +87,22 @@ var AlgorithmToHash = map[uint8]crypto.Hash{
 
 // DNSSEC hashing algorithm codes.
 const (
-	_      uint8 = iota
-	SHA1         // RFC 4034.
-	SHA256       // RFC 4509.
-	GOST94       // RFC 5933.
-	SHA384       // Experimental.
-	SHA512       // Experimental.
+	SHA1     uint8 = 1 // RFC 4034.
+	SHA256   uint8 = 2 // RFC 4509.
+	GOST94   uint8 = 3 // RFC 5933.
+	SHA384   uint8 = 4 // RFC 6605.
+	GOST2012 uint8 = 5 // RFC 9558.
+	SM3      uint8 = 6 // RFC 9563.
 )
 
 // HashToString is a map of hash IDs to names.
 var HashToString = map[uint8]string{
-	SHA1:   "SHA1",
-	SHA256: "SHA256",
-	GOST94: "GOST94",
-	SHA384: "SHA384",
-	SHA512: "SHA512",
+	SHA1:     "SHA1",
+	SHA256:   "SHA256",
+	GOST94:   "GOST94",
+	SHA384:   "SHA384",
+	GOST2012: "GOST2012",
+	SM3:      "SM3",
 }
 
 // DNSKEY flag values.
@@ -171,8 +179,6 @@ func (k *DNSKEY) ToDS(h uint8) *DS {
 		hash = crypto.SHA256
 	case SHA384:
 		hash = crypto.SHA384
-	case SHA512:
-		hash = crypto.SHA512
 	default:
 		return nil
 	}
@@ -312,7 +318,8 @@ func sign(k crypto.Signer, hashed []byte, hash crypto.Hash, alg uint8) ([]byte, 
 // [codeberg.org/miekg/dns/dnsutil.IsRRset], and neither is checked if the RRSIG's TypeCovered matches the
 // type in rrset.
 //
-// This function copies the rdata of some RRs (to lowercase domain names) for the validation to work.
+// This function overwrites the rdata of some RRs (to lowercase domain names) for the validation to work. If
+// you need
 // It also checks that the Zone Key bit (RFC 4034 2.1.1) is set on the DNSKEY
 // and that the Protocol field is set to 3 (RFC 4034 2.1.2). Options can not be nil.
 //
@@ -362,7 +369,7 @@ func (rr *RRSIG) Verify(k *DNSKEY, rrset []RR, options *SignOption) error {
 	sigbuf, _ := pack.Base64([]byte(rr.Signature))
 
 	var h hash.Hash
-	hash, _ := AlgorithmToHash[rr.Algorithm] // newer alg do their own hashing, ignore...
+	hash := AlgorithmToHash[rr.Algorithm] // newer alg do their own hashing, ignore...
 
 	switch rr.Algorithm {
 	case RSASHA1, RSASHA1NSEC3SHA1, RSASHA256, RSASHA512:
@@ -403,6 +410,18 @@ func (rr *RRSIG) Verify(k *DNSKEY, rrset []RR, options *SignOption) error {
 		}
 		return ErrSig
 
+	case MLDSA44:
+		pubkey := k.publicKeyMLDSA44()
+		if pubkey == nil {
+			return ErrKey
+		}
+
+		// Nil options selects pure ML-DSA with an empty context, see draft-westerbaan-dnssec-mldsa.
+		if mldsa.Verify(pubkey, signeddata, sigbuf, nil) == nil {
+			return nil
+		}
+		return ErrSig
+
 	default:
 		if options.VerifyFunc != nil {
 			if options.VerifyFunc(k, signeddata, sigbuf) {
@@ -434,8 +453,8 @@ func (rr *RRSIG) ValidPeriod(t time.Time) bool {
 
 // SignOption are options that are given to the signer and verifier.
 type SignOption struct {
-	// If Pooler is set is will be used for all memory allocations. If nil the default pooler will be used and
-	// the buffers size used will be defaultBufSize
+	// If Pooler is set it will be used for all memory allocations. If nil the [pool.Noop] pooler will be
+	// used.
 	pool.Pooler
 
 	// If VerifyFunc is non-nil it will be used to verify a signture in [RRSIG.Verify]. This is useful when

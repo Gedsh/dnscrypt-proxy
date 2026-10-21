@@ -7,6 +7,7 @@ import (
 	"html"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"sort"
@@ -192,14 +193,12 @@ func NewMonitoringUI(proxy *Proxy) *MonitoringUI {
 				if origin == "" {
 					return true // Allow requests without Origin header (direct connections)
 				}
-				host := r.Host
-				if host == "" {
+				originURL, err := url.Parse(origin)
+				if err != nil || originURL.User != nil || originURL.Host == "" ||
+					originURL.Path != "" || originURL.RawQuery != "" || originURL.Fragment != "" {
 					return false
 				}
-				// Allow same-origin requests and localhost variations
-				return origin == "http://"+host || origin == "https://"+host ||
-					origin == "http://localhost:8080" || origin == "https://localhost:8080" ||
-					origin == "http://127.0.0.1:8080" || origin == "https://127.0.0.1:8080"
+				return originURL.Scheme == requestScheme(r) && strings.EqualFold(originURL.Host, r.Host)
 			},
 		},
 		clients: make(map[*websocket.Conn]bool),
@@ -1021,11 +1020,24 @@ func (mc *MetricsCollector) GetMetrics() map[string]any {
 	return metrics
 }
 
-// setCORSHeaders - Sets standard CORS headers for all responses
-func setCORSHeaders(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+// requestScheme - Returns the scheme the client used, which a TLS-terminating
+// proxy reports in X-Forwarded-Proto. Browsers cannot forge that header on a
+// WebSocket handshake.
+func requestScheme(r *http.Request) string {
+	forwarded := r.Header.Get("X-Forwarded-Proto")
+	if comma := strings.IndexByte(forwarded, ','); comma >= 0 {
+		forwarded = forwarded[:comma]
+	}
+	switch strings.ToLower(strings.TrimSpace(forwarded)) {
+	case "http":
+		return "http"
+	case "https":
+		return "https"
+	}
+	if r.TLS != nil {
+		return "https"
+	}
+	return "http"
 }
 
 // setDynamicCacheHeaders - Sets cache headers for dynamic content (metrics, API)
@@ -1070,9 +1082,6 @@ func (ui *MonitoringUI) handleTestQuery(w http.ResponseWriter, r *http.Request) 
 
 // handleRoot - Handles the root path
 func (ui *MonitoringUI) handleRoot(w http.ResponseWriter, r *http.Request) {
-	// Set CORS headers
-	setCORSHeaders(w)
-
 	// Handle preflight OPTIONS request
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
@@ -1127,9 +1136,6 @@ func (ui *MonitoringUI) handleMetrics(w http.ResponseWriter, r *http.Request) {
 
 // handleWebSocket - Handles WebSocket connections
 func (ui *MonitoringUI) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// Set CORS headers for WebSocket
-	setCORSHeaders(w)
-
 	// Handle preflight OPTIONS request
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
@@ -1223,7 +1229,6 @@ func (ui *MonitoringUI) handleStatic(w http.ResponseWriter, r *http.Request) {
 
 // handleStaticJS - Serves the JavaScript for the monitoring UI
 func (ui *MonitoringUI) handleStaticJS(w http.ResponseWriter, r *http.Request) {
-	setCORSHeaders(w)
 	// JavaScript is static - cache for 1 hour
 	setStaticCacheHeaders(w, 3600)
 	w.Header().Set("Content-Type", "application/javascript")
