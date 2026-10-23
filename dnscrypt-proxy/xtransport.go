@@ -39,7 +39,7 @@ var hasAESGCMHardwareSupport = cpu.X86.HasAES && cpu.X86.HasPCLMULQDQ ||
 	cpu.S390X.HasAES && cpu.S390X.HasAESGCM
 
 const (
-	DefaultBootstrapResolver    = "9.9.9.9:53"
+	DefaultBootstrapResolver    = "8.8.8.8:53"
 	DefaultKeepAlive            = 5 * time.Second
 	DefaultTimeout              = 30 * time.Second
 	DefaultIdleConnTimeout      = 90 * time.Second
@@ -103,6 +103,7 @@ type XTransport struct {
 	httpProxyFunction        func(*http.Request) (*url.URL, error)
 	tlsClientCreds           DOHClientCreds
 	keyLogWriter             io.Writer
+	certHashes               atomic.Pointer[map[string][][]byte]
 	ipsCacheFilePath         string
 }
 
@@ -475,6 +476,24 @@ func (xTransport *XTransport) rebuildTransport() {
 	if xTransport.tlsDisableSessionTickets {
 		tlsClientConfig.SessionTicketsDisabled = true
 	}
+	if xTransport.certHashes.Load() != nil {
+		tlsClientConfig.VerifyConnection = func(cs tls.ConnectionState) error {
+			certHashes := xTransport.certHashes.Load()
+			var hashes [][]byte
+			if cs.ServerName != "" {
+				hashes = (*certHashes)[certHashesHostKey(cs.ServerName)]
+			} else if len(cs.PeerCertificates) > 0 {
+				// The stamp host name is an IP address, so there is no SNI: use the certificate addresses.
+				for _, ip := range cs.PeerCertificates[0].IPAddresses {
+					hashes = append(hashes, (*certHashes)[ip.String()]...)
+				}
+			}
+			if len(hashes) > 0 && !certHashesMatch(&cs, hashes) {
+				return errCertHashNotFound
+			}
+			return nil
+		}
+	}
 	if xTransport.tlsPreferRSA {
 		tlsClientConfig.MaxVersion = tls.VersionTLS12
 		if hasAESGCMHardwareSupport {
@@ -806,6 +825,12 @@ func (xTransport *XTransport) Fetch(
 	client := http.Client{
 		Transport: xTransport.transport,
 		Timeout:   timeout,
+	}
+	if certHashes := xTransport.certHashes.Load(); certHashes != nil && len((*certHashes)[certHashesHostKey(url.Host)]) > 0 {
+		// The other host's certificate wouldn't be checked against these hashes
+		client.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return errors.New("Redirects are not followed for servers with certificate hashes")
+		}
 	}
 	host, port := ExtractHostAndPort(url.Host, 443)
 	hasAltSupport := false
